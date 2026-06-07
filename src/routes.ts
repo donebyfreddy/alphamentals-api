@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { Response } from 'express';
 import { Router } from 'express';
 import { z } from 'zod';
 import { bridgeConfig } from './config.js';
@@ -12,6 +13,8 @@ import {
 } from './state.js';
 
 export const bridgeRouter = Router();
+
+const candleTimeframes = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'] as const;
 
 const connectSchema = z.object({
   accountId: z.string().uuid().optional(),
@@ -80,6 +83,55 @@ const heartbeatSchema = z.object({
   quotes: z.array(quoteSchema).default([]),
   error: z.string().nullable().optional(),
 });
+
+const priceQuerySchema = z.object({
+  symbol: z.string().trim().min(1),
+});
+
+const quotesQuerySchema = z.object({
+  symbols: z.string().trim().min(1),
+});
+
+const candlesQuerySchema = z.object({
+  symbol: z.string().trim().min(1),
+  timeframe: z.enum(candleTimeframes).default('M5'),
+  limit: z.coerce.number().int().min(1).max(1000).default(100),
+});
+
+function logMarketDataRequest(endpoint: string, details: Record<string, unknown>) {
+  console.log('[mt5-bridge] market data request', {
+    endpoint,
+    ...details,
+  });
+}
+
+function logMarketDataResponse(endpoint: string, status: number, details: Record<string, unknown>) {
+  console.log('[mt5-bridge] market data response', {
+    endpoint,
+    status,
+    ...details,
+  });
+}
+
+function respondPriceSourceNotReady(
+  res: Response,
+  endpoint: string,
+  details: Record<string, unknown>,
+) {
+  const payload = {
+    ok: false,
+    error: 'MT5_PRICE_SOURCE_NOT_READY',
+    message: 'MT5 price source is not connected yet',
+  };
+
+  logMarketDataResponse(endpoint, 503, details);
+  res.status(503).json(payload);
+}
+
+function toMidPrice(bid: number | null, ask: number | null) {
+  if (bid == null || ask == null) return null;
+  return Number(((bid + ask) / 2).toFixed(8));
+}
 
 bridgeRouter.post('/accounts/connect', (req, res) => {
   const parsed = connectSchema.safeParse(req.body);
@@ -204,6 +256,121 @@ bridgeRouter.get('/accounts/:accountId/positions', (req, res) => {
   }
 
   res.json(state.positions);
+});
+
+bridgeRouter.get('/market-data/price', (req, res) => {
+  const parsed = priceQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({
+      ok: false,
+      error: 'INVALID_QUERY',
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  const endpoint = '/market-data/price';
+  const symbol = normalizeQuoteSymbol(parsed.data.symbol);
+  logMarketDataRequest(endpoint, {
+    bridgeUrl: `http://0.0.0.0:${bridgeConfig.port}`,
+    symbol,
+  });
+
+  const quote = getLatestQuotes([symbol])[symbol];
+  if (!quote) {
+    respondPriceSourceNotReady(res, endpoint, { symbol });
+    return;
+  }
+
+  const payload = {
+    ok: true,
+    symbol,
+    bid: quote.bid,
+    ask: quote.ask,
+    mid: toMidPrice(quote.bid, quote.ask),
+    timestamp: quote.updatedAt,
+    source: 'mt5',
+  };
+
+  logMarketDataResponse(endpoint, 200, { symbol });
+  res.json(payload);
+});
+
+bridgeRouter.get('/market-data/quotes', (req, res) => {
+  const parsed = quotesQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({
+      ok: false,
+      error: 'INVALID_QUERY',
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  const endpoint = '/market-data/quotes';
+  const symbols = parsed.data.symbols
+    .split(',')
+    .map((symbol) => normalizeQuoteSymbol(symbol))
+    .filter(Boolean);
+
+  logMarketDataRequest(endpoint, {
+    bridgeUrl: `http://0.0.0.0:${bridgeConfig.port}`,
+    symbols,
+  });
+
+  const latestQuotes = getLatestQuotes(symbols);
+  const quotes = symbols
+    .map((symbol) => latestQuotes[symbol])
+    .filter((quote): quote is NonNullable<typeof latestQuotes[string]> => Boolean(quote))
+    .map((quote) => ({
+      symbol: quote.symbol,
+      bid: quote.bid,
+      ask: quote.ask,
+      mid: toMidPrice(quote.bid, quote.ask),
+      timestamp: quote.updatedAt,
+      source: 'mt5' as const,
+    }));
+
+  if (!quotes.length) {
+    respondPriceSourceNotReady(res, endpoint, { symbols });
+    return;
+  }
+
+  logMarketDataResponse(endpoint, 200, {
+    symbols,
+    quoteCount: quotes.length,
+  });
+  res.json({
+    ok: true,
+    quotes,
+  });
+});
+
+bridgeRouter.get('/market-data/candles', (req, res) => {
+  const parsed = candlesQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({
+      ok: false,
+      error: 'INVALID_QUERY',
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  const endpoint = '/market-data/candles';
+  const symbol = normalizeQuoteSymbol(parsed.data.symbol);
+  logMarketDataRequest(endpoint, {
+    bridgeUrl: `http://0.0.0.0:${bridgeConfig.port}`,
+    symbol,
+    timeframe: parsed.data.timeframe,
+    limit: parsed.data.limit,
+  });
+
+  respondPriceSourceNotReady(res, endpoint, {
+    symbol,
+    timeframe: parsed.data.timeframe,
+    limit: parsed.data.limit,
+  });
 });
 
 bridgeRouter.get('/quotes', (req, res) => {

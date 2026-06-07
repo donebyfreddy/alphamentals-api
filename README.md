@@ -26,6 +26,9 @@ pm2 save
 - `GET /accounts/:accountId/status`
 - `GET /accounts/:accountId/info`
 - `GET /accounts/:accountId/positions`
+- `GET /market-data/price?symbol=XAUUSD`
+- `GET /market-data/quotes?symbols=XAUUSD,EURUSD,GBPUSD`
+- `GET /market-data/candles?symbol=XAUUSD&timeframe=M5&limit=100`
 - `POST /ea/heartbeat`
 
 ## Auth
@@ -44,17 +47,34 @@ curl http://127.0.0.1:3001/health
 curl -H "x-api-key: YOUR_KEY" http://127.0.0.1:3001/accounts/demo-account-1/positions
 ```
 
-Target API examples for later phases:
-
 ```bash
-curl -H "x-api-key: YOUR_KEY" "http://127.0.0.1:3001/accounts/demo-account-1/candles?symbol=XAUUSD&timeframe=M5&limit=500"
+curl -H "x-api-key: YOUR_KEY" "http://127.0.0.1:3001/market-data/price?symbol=XAUUSD"
 ```
 
 ```bash
-curl -X POST http://127.0.0.1:3001/accounts/demo-account-1/trade \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: YOUR_KEY" \
-  -d '{"symbol":"XAUUSD","side":"buy","volume":0.1,"stopLoss":2320.5,"takeProfit":2335.5}'
+curl -H "x-api-key: YOUR_KEY" "http://127.0.0.1:3001/market-data/quotes?symbols=XAUUSD,EURUSD"
+```
+
+```bash
+curl -H "x-api-key: YOUR_KEY" "http://127.0.0.1:3001/market-data/candles?symbol=XAUUSD&timeframe=M5&limit=100"
+```
+
+External VPS tests:
+
+```bash
+curl -H "X-API-Key: <KEY>" "http://217.71.203.77:3001/health"
+```
+
+```bash
+curl -H "X-API-Key: <KEY>" "http://217.71.203.77:3001/market-data/price?symbol=XAUUSD"
+```
+
+```bash
+curl -H "X-API-Key: <KEY>" "http://217.71.203.77:3001/market-data/quotes?symbols=XAUUSD,EURUSD"
+```
+
+```bash
+curl -H "X-API-Key: <KEY>" "http://217.71.203.77:3001/market-data/candles?symbol=XAUUSD&timeframe=M5&limit=100"
 ```
 
 ## MT5 EA
@@ -69,6 +89,7 @@ curl -X POST http://127.0.0.1:3001/accounts/demo-account-1/trade \
 - currency
 - leverage
 - posiciones abiertas
+- quotes para symbols observados
 
 En MT5 abre `Tools > Options > Expert Advisors` y agrega la URL del bridge a `Allow WebRequest for listed URL`.
 
@@ -80,4 +101,4 @@ http://127.0.0.1:3001
 
 Si Render va a consultar por un `accountId` estable, pon ese mismo valor en el input `BridgeAccountId` del EA.
 
-Las fases siguientes ampliaran candles, precios, historial y ejecucion.
+`/market-data/candles` todavia devuelve un JSON seguro de `MT5_PRICE_SOURCE_NOT_READY` hasta que la integracion de velas con MT5 este conectada.

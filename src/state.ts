@@ -49,7 +49,38 @@ export type BridgePosition = {
   comment?: string | null;
 };
 
+export type BridgeQuote = {
+  symbol: string;
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  high: number | null;
+  low: number | null;
+  previousClose: number | null;
+  updatedAt: string;
+  source: 'mt5-bridge';
+};
+
 const accounts = new Map<string, BridgeAccountState>();
+const latestQuotes = new Map<string, BridgeQuote>();
+
+export function normalizeQuoteSymbol(symbol: string) {
+  const normalized = symbol.trim().toUpperCase();
+
+  if (normalized.includes('XAUUSD')) return 'XAUUSD';
+  if (normalized.includes('EURUSD')) return 'EURUSD';
+  if (normalized.includes('GBPUSD')) return 'GBPUSD';
+  if (normalized.includes('DXY') || normalized.includes('USDX')) return 'DXY';
+  if (
+    normalized.includes('USOIL') ||
+    normalized.includes('WTI') ||
+    normalized.includes('OIL')
+  ) {
+    return 'USOIL';
+  }
+
+  return normalized;
+}
 
 export function saveAccountState(state: BridgeAccountState) {
   accounts.set(state.accountId, state);
@@ -62,6 +93,33 @@ export function getAccountState(accountId: string) {
 
 export function listAccountStates() {
   return [...accounts.values()];
+}
+
+export function updateLatestQuotes(quotes: BridgeQuote[]) {
+  for (const quote of quotes) {
+    const symbol = normalizeQuoteSymbol(quote.symbol);
+
+    latestQuotes.set(symbol, {
+      ...quote,
+      symbol,
+      source: 'mt5-bridge',
+    });
+  }
+}
+
+export function getLatestQuotes(symbols?: string[]) {
+  if (!symbols?.length) {
+    return Object.fromEntries(latestQuotes.entries());
+  }
+
+  const quotes: Record<string, BridgeQuote | undefined> = {};
+
+  for (const symbol of symbols) {
+    const normalized = normalizeQuoteSymbol(symbol);
+    quotes[normalized] = latestQuotes.get(normalized);
+  }
+
+  return quotes;
 }
 
 export function updateAccountSnapshot(params: {

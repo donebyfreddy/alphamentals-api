@@ -8,6 +8,7 @@ input string BridgeBaseUrl = "http://127.0.0.1:3001";
 input string BridgeApiKey = "";
 input string BridgeAccountId = "";
 input int HeartbeatSeconds = 10;
+input string WatchedSymbols = "XAUUSD,EURUSD,GBPUSD,DXY,USOIL";
 
 string JsonEscape(string value)
   {
@@ -36,6 +37,13 @@ string JsonNumber(double value)
 string JsonNumberOrNull(double value)
   {
    if(value == 0.0)
+      return "null";
+   return JsonNumber(value);
+  }
+
+string JsonDoubleValueOrNull(bool ok, double value)
+  {
+   if(!ok)
       return "null";
    return JsonNumber(value);
   }
@@ -120,6 +128,54 @@ string BuildPositionsJson()
    return json;
   }
 
+string BuildQuotesJson()
+  {
+   string parts[];
+   int total = StringSplit(WatchedSymbols, ',', parts);
+   string json = "[";
+   bool first = true;
+
+   for(int i = 0; i < total; i++)
+     {
+      string symbol = parts[i];
+      StringTrimLeft(symbol);
+      StringTrimRight(symbol);
+
+      if(StringLen(symbol) == 0)
+         continue;
+
+      SymbolSelect(symbol, true);
+
+      MqlTick tick;
+      bool hasTick = SymbolInfoTick(symbol, tick);
+      double previousClose = iClose(symbol, PERIOD_D1, 1);
+      double dailyHigh = iHigh(symbol, PERIOD_D1, 0);
+      double dailyLow = iLow(symbol, PERIOD_D1, 0);
+      bool hasPreviousClose = previousClose != 0.0;
+      bool hasDailyHigh = dailyHigh != 0.0;
+      bool hasDailyLow = dailyLow != 0.0;
+
+      if(!first)
+         json += ",";
+      first = false;
+
+      json += "{";
+      json += "\"symbol\":" + JsonString(symbol) + ",";
+      json += "\"bid\":" + JsonDoubleValueOrNull(hasTick, tick.bid) + ",";
+      json += "\"ask\":" + JsonDoubleValueOrNull(hasTick, tick.ask) + ",";
+      json += "\"last\":" + JsonDoubleValueOrNull(hasTick, tick.last) + ",";
+      json += "\"high\":" + JsonDoubleValueOrNull(hasDailyHigh, dailyHigh) + ",";
+      json += "\"low\":" + JsonDoubleValueOrNull(hasDailyLow, dailyLow) + ",";
+      json += "\"previousClose\":" + JsonDoubleValueOrNull(hasPreviousClose, previousClose) + ",";
+      json += "\"updatedAt\":" + JsonString(IsoTime(TimeCurrent())) + ",";
+      json += "\"source\":\"mt5-bridge\"";
+      json += "}";
+     }
+
+   json += "]";
+   return json;
+  }
+
 bool PostHeartbeat()
   {
    if(StringLen(BridgeApiKey) == 0)
@@ -131,7 +187,8 @@ bool PostHeartbeat()
    string body = "{";
    body += "\"accountId\":" + JsonString(AccountId()) + ",";
    body += "\"account\":" + BuildAccountJson() + ",";
-   body += "\"positions\":" + BuildPositionsJson();
+   body += "\"positions\":" + BuildPositionsJson() + ",";
+   body += "\"quotes\":" + BuildQuotesJson();
    body += "}";
 
    string url = BridgeBaseUrl + "/ea/heartbeat";

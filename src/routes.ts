@@ -2,7 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { bridgeConfig } from './config.js';
-import { getAccountState, saveAccountState, updateAccountSnapshot } from './state.js';
+import {
+  getAccountState,
+  getLatestQuotes,
+  normalizeQuoteSymbol,
+  saveAccountState,
+  updateAccountSnapshot,
+  updateLatestQuotes,
+} from './state.js';
 
 export const bridgeRouter = Router();
 
@@ -54,10 +61,23 @@ const positionSchema = z.object({
   comment: z.string().nullable().optional(),
 });
 
+const quoteSchema = z.object({
+  symbol: z.string().trim().min(1),
+  bid: z.number().nullable(),
+  ask: z.number().nullable(),
+  last: z.number().nullable(),
+  high: z.number().nullable(),
+  low: z.number().nullable(),
+  previousClose: z.number().nullable(),
+  updatedAt: z.string().trim().min(1),
+  source: z.literal('mt5-bridge'),
+});
+
 const heartbeatSchema = z.object({
   accountId: z.string().trim().min(1),
   account: accountInfoSchema,
   positions: z.array(positionSchema).default([]),
+  quotes: z.array(quoteSchema).default([]),
   error: z.string().nullable().optional(),
 });
 
@@ -186,6 +206,39 @@ bridgeRouter.get('/accounts/:accountId/positions', (req, res) => {
   res.json(state.positions);
 });
 
+bridgeRouter.get('/quotes', (req, res) => {
+  const symbolsParam = typeof req.query.symbols === 'string' ? req.query.symbols : '';
+  const requestedSymbols = symbolsParam
+    .split(',')
+    .map((symbol) => symbol.trim())
+    .filter(Boolean);
+
+  const latestQuotes = getLatestQuotes(requestedSymbols);
+  const data: Record<string, unknown> = requestedSymbols.length ? {} : latestQuotes;
+  const errors: Record<string, string> = {};
+
+  if (requestedSymbols.length) {
+    for (const symbol of requestedSymbols) {
+      const normalized = normalizeQuoteSymbol(symbol);
+      const quote = latestQuotes[normalized];
+
+      if (quote) {
+        data[normalized] = quote;
+        continue;
+      }
+
+      errors[normalized] = 'Quote not available from the latest MT5 heartbeat.';
+    }
+  }
+
+  res.json({
+    ok: true,
+    data,
+    errors,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 bridgeRouter.post('/ea/heartbeat', (req, res) => {
   const parsed = heartbeatSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -201,6 +254,8 @@ bridgeRouter.post('/ea/heartbeat', (req, res) => {
     ...parsed.data.account,
     updatedAt: parsed.data.account.updatedAt ?? new Date().toISOString(),
   };
+
+  updateLatestQuotes(parsed.data.quotes);
 
   const state = updateAccountSnapshot({
     accountId: parsed.data.accountId,

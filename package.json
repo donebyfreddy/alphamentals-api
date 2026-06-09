@@ -2,13 +2,11 @@
   "name": "alphamentals-api",
   "private": true,
   "version": "0.1.0",
-  "main": "dist-api/backend/server/index.js",
+  "main": "api/dist-api/backend/server/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "dev:api": "tsx backend/server/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "dev:api": "tsx api/backend/server/index.ts",
     "build:api": "tsc -p tsconfig.backend.json",
-    "start": "node dist-api/backend/server/index.js",
+    "start": "node api/dist-api/backend/server/index.js",
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:restart": "pm2 restart alphamentals-api",
     "pm2:logs": "pm2 logs alphamentals-api"

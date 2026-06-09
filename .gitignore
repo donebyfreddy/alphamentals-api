@@ -1,4 +1,9 @@
 dist/
+api/dist-api/
 node_modules/
 .env
+mt5bridge/.env
+mt5bridge/.venv/
 npm-debug.log*
+*.pyc
+__pycache__/

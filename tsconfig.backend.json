@@ -3,8 +3,8 @@
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "Node",
-    "outDir": "dist-api",
-    "rootDir": ".",
+    "outDir": "api/dist-api",
+    "rootDir": "./api",
     "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -13,14 +13,14 @@
     "noEmitOnError": false
   },
   "include": [
-    "src/**/*.ts",
-    "backend/server/**/*.ts"
+    "api/src/**/*.ts",
+    "api/backend/server/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "dist-api",
-    "src/index.ts",
-    "src/routes.ts"
+    "api/dist-api",
+    "api/src/index.ts",
+    "api/src/routes.ts"
   ]
 }

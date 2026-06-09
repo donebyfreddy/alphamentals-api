@@ -1,8 +1,0 @@
-fastapi
-uvicorn[standard]
-pydantic
-yfinance
-pandas
-requests
-python-dotenv
-telethon

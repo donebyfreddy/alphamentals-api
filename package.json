@@ -6,16 +6,28 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/src/index.js"
+    "start": "node dist/src/index.js",
+    "dev:api": "tsx backend/server/index.ts",
+    "build:api": "tsc -p tsconfig.backend.json",
+    "start:api": "node dist-api/backend/server/index.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@mathieuc/tradingview": "^3.0.0",
+    "@supabase/supabase-js": "^2.50.0",
+    "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^5.1.0",
+    "pg": "^8.13.0",
+    "ws": "^8.18.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
     "@types/express": "^5.0.3",
     "@types/node": "^22.15.30",
+    "@types/pg": "^8.11.6",
+    "@types/ws": "^8.5.12",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"
   }

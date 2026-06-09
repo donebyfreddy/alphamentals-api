@@ -1,0 +1,1 @@
+export const DEFAULT_SYMBOLS = ['XAUUSD', 'EURUSD', 'GBPUSD', 'DXY', 'USOIL', 'USDJPY', 'GBPJPY'];

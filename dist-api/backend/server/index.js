@@ -90,7 +90,7 @@ const corsOptions = {
     optionsSuccessStatus: 204,
 };
 // Respond to every OPTIONS preflight before any route or auth middleware runs.
-app.options('*', (0, cors_1.default)(corsOptions));
+app.options('/*splat', (0, cors_1.default)(corsOptions));
 app.use((0, cors_1.default)(corsOptions));
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use('/api/market-data', marketData_js_1.marketDataRouter);

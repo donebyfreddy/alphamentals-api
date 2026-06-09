@@ -93,7 +93,7 @@ const corsOptions: cors.CorsOptions = {
 };
 
 // Respond to every OPTIONS preflight before any route or auth middleware runs.
-app.options('*', cors(corsOptions));
+app.options('/*splat', cors(corsOptions));
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 

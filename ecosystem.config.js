@@ -2,17 +2,18 @@ module.exports = {
   apps: [
     {
       name: 'alphamentals-api',
-      cwd: __dirname,
       script: 'dist-api/backend/server/index.js',
+      cwd: __dirname,
       instances: 1,
-      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '500M',
       env: {
         NODE_ENV: 'production',
-        API_HOST: '0.0.0.0',
-        // Nginx proxies api.alphamentals.com → 127.0.0.1:3001
-        API_PORT: 3001,
-        // Python MT5 bridge runs internally on port 8001
+        HOST: '0.0.0.0',
+        PORT: '3001',
         MT5_BRIDGE_URL: 'http://127.0.0.1:8001',
+        CORS_ORIGINS: 'https://alphamentals-dashboard.vercel.app,http://localhost:3000',
       },
     },
   ],

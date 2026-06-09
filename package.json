@@ -1,16 +1,17 @@
 {
-  "name": "alphamentals-mt5-bridge",
+  "name": "alphamentals-api",
   "private": true,
   "version": "0.1.0",
-  "main": "dist/src/index.js",
+  "main": "dist-api/backend/server/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/src/index.js",
     "dev:api": "tsx backend/server/index.ts",
+    "build": "tsc -p tsconfig.json",
     "build:api": "tsc -p tsconfig.backend.json",
-    "build:api:bundle": "npx esbuild backend/server/index.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist-api/backend/server/index.js",
-    "start:api": "node dist-api/backend/server/index.js"
+    "start": "node dist-api/backend/server/index.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:restart": "pm2 restart alphamentals-api",
+    "pm2:logs": "pm2 logs alphamentals-api"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",

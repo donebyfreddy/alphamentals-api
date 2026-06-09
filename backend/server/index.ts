@@ -50,23 +50,31 @@ import { logOpenAIConfiguration } from './lib/openaiConfig.js';
 dotenv.config();
 
 const app = express();
-const HOST = process.env.API_HOST ?? '0.0.0.0';
-const IS_VERCEL = process.env.VERCEL === '1';
+const HOST = process.env.HOST ?? process.env.API_HOST ?? '0.0.0.0';
+const PORT_ENV = process.env.PORT ?? process.env.API_PORT ?? process.env.SERVER_PORT;
 const BACKEND_DISCOVERY_FILE = process.env.ALPHAMENTALS_BACKEND_DISCOVERY_FILE ?? '/tmp/alphamentals-backend-discovery.json';
 const DISCOVERY_PORTS = [3001, 3000, 3002, 3005, 3333, 4000, 5000, 8000, 8080, 8787];
 
+// Parse CORS_ORIGINS env var — comma-separated list of allowed origins
+const envCorsOrigins = (process.env.CORS_ORIGINS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 const ALLOWED_ORIGIN_STRINGS: string[] = [
+  ...envCorsOrigins,
   process.env.FRONTEND_ORIGIN,
   process.env.FRONTEND_ORIGIN_ALT,
+  'https://alphamentals-dashboard.pages.dev',
   'https://alphamentals-dashboard.vercel.app',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   'http://localhost:3001',
-].filter(Boolean) as string[];
+].filter((v): v is string => typeof v === 'string' && v.length > 0);
 
 const VERCEL_PREVIEW_PATTERN = /^https:\/\/alphamentals-dashboard-[a-z0-9-]+-[a-z0-9]+\.vercel\.app$/;
 
-app.use(cors({
+const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
     if (
       !origin
@@ -75,13 +83,18 @@ app.use(cors({
     ) {
       callback(null, true);
     } else {
-      callback(null, false);
+      callback(new Error(`CORS: origin not allowed — ${origin}`));
     }
   },
-  methods: 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-  allowedHeaders: 'Content-Type, Authorization, X-Requested-With, x-api-key',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
   credentials: true,
-}));
+  optionsSuccessStatus: 204,
+};
+
+// Respond to every OPTIONS preflight before any route or auth middleware runs.
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 
 app.use('/api/market-data', marketDataRouter);
@@ -100,6 +113,7 @@ app.use('/api/ctrader', ctraderRouter);
 app.use('/api/saxo', saxoRouter);
 app.use('/api/mt5-tracking', mt5TrackingRouter);
 app.use('/api/trading-accounts', tradingAccountsRouter);
+app.use('/api/accounts', tradingAccountsRouter);
 app.use('/api/account-onboarding', accountOnboardingRouter);
 app.use('/api/fundamentals', fundamentalsRouter);
 app.use('/api/market-intelligence', marketIntelligenceRouter);
@@ -120,24 +134,30 @@ app.use('/api/ai-analysis', aiAnalysisRouter);
 app.use('/api/pair-ai', pairAiRouter);
 app.use('/api/cost', costRouter);
 
-function sendHealth(_req: express.Request, res: express.Response) {
+function buildHealthPayload(port: number) {
   const telegram = getTelegramRuntimeState();
-  res.json({
+  return {
     ok: true,
     service: 'alphamentals-api',
     kind: 'backend',
     status: 'ok',
+    env: process.env.NODE_ENV ?? 'development',
+    host: HOST,
+    port,
     timestamp: Date.now(),
     telegram: {
       enabled: telegram.enabled,
       connected: telegram.connected,
       target_chat_accessible: telegram.targetChatAccessible,
     },
-  });
+  };
 }
 
-app.get('/api/health', sendHealth);
-app.get('/health', sendHealth);
+// Health port is resolved after listen — store it once known.
+let resolvedPort = 3001;
+
+app.get('/api/health', (_req, res) => res.json(buildHealthPayload(resolvedPort)));
+app.get('/health', (_req, res) => res.json(buildHealthPayload(resolvedPort)));
 app.get('/api/ping', (_req, res) => res.json({ ok: true }));
 app.get('/ping', (_req, res) => res.json({ ok: true }));
 
@@ -152,10 +172,9 @@ app.use('/api', (req: express.Request, res: express.Response) => {
 });
 
 function configuredPortCandidates() {
-  const explicit = [process.env.API_PORT, process.env.SERVER_PORT, process.env.PORT]
-    .map((value) => Number(value))
+  const explicit = [process.env.PORT, process.env.API_PORT, process.env.SERVER_PORT]
+    .map(Number)
     .filter((value) => Number.isInteger(value) && value > 0);
-
   return [...new Set([...explicit, ...DISCOVERY_PORTS])];
 }
 
@@ -163,23 +182,16 @@ function canListen(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = net.createServer();
     probe.once('error', () => resolve(false));
-    probe.once('listening', () => {
-      probe.close(() => resolve(true));
-    });
+    probe.once('listening', () => { probe.close(() => resolve(true)); });
     probe.listen(port, HOST);
   });
 }
 
 async function resolveListenPort() {
-  // When PORT is explicitly set (e.g. Render injects PORT=10000), bind to it directly
-  // without probing — the probe creates a race condition that causes Render's port
-  // scanner to time out before the real server is ready.
-  const envPort = [process.env.PORT, process.env.API_PORT, process.env.SERVER_PORT]
-    .map(Number)
-    .find((p) => Number.isInteger(p) && p > 0);
-  if (envPort) return envPort;
+  const envPort = PORT_ENV ? Number(PORT_ENV) : Number.NaN;
+  if (Number.isInteger(envPort) && envPort > 0) return envPort;
 
-  for (const port of DISCOVERY_PORTS) {
+  for (const port of configuredPortCandidates()) {
     if (await canListen(port)) return port;
   }
   return 0;
@@ -195,72 +207,65 @@ async function writeDiscoveryManifest(port: number) {
     pid: process.pid,
   };
   try {
-    await fs.writeFile(/* turbopackIgnore: true */ BACKEND_DISCOVERY_FILE, JSON.stringify(payload, null, 2), 'utf8');
+    await fs.writeFile(BACKEND_DISCOVERY_FILE, JSON.stringify(payload, null, 2), 'utf8');
   } catch (error) {
-    console.warn('[server] Failed to write backend discovery manifest:', error instanceof Error ? error.message : String(error));
+    console.warn('[alphamentals-api] failed to write backend discovery manifest:', error instanceof Error ? error.message : String(error));
   }
 }
 
-const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function scheduleMacroSync() {
   if (!process.env.FRED_API_KEY) {
-    console.warn('[server] ⚠️  FRED_API_KEY not set — macro sync disabled');
+    console.warn('[alphamentals-api] FRED_API_KEY not set — macro sync disabled');
     return;
   }
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.warn('[server] ⚠️  SUPABASE_SERVICE_ROLE_KEY not set — macro sync disabled');
+    console.warn('[alphamentals-api] SUPABASE_SERVICE_ROLE_KEY not set — macro sync disabled');
     return;
   }
 
-  // Run once on startup (non-blocking), then every 24 hours
   setImmediate(async () => {
-    try {
-      await syncMacroIndicators();
-    } catch (err) {
-      console.error('[server] Initial macro sync failed:', (err as Error).message);
-    }
+    try { await syncMacroIndicators(); }
+    catch (err) { console.error('[alphamentals-api] initial macro sync failed:', (err as Error).message); }
   });
 
   setInterval(async () => {
-    try {
-      await syncMacroIndicators();
-    } catch (err) {
-      console.error('[server] Scheduled macro sync failed:', (err as Error).message);
-    }
+    try { await syncMacroIndicators(); }
+    catch (err) { console.error('[alphamentals-api] scheduled macro sync failed:', (err as Error).message); }
   }, SYNC_INTERVAL_MS);
 }
 
 function scheduleFundamentals() {
-  setImmediate(() => {
-    startNewsFetcherJob();
-  });
+  setImmediate(() => { startNewsFetcherJob(); });
 }
 
 async function bootstrap() {
   const port = await resolveListenPort();
+  resolvedPort = port;
 
   app.listen(port, HOST, async () => {
-    const addressHost = HOST === '0.0.0.0' ? '127.0.0.1' : HOST;
-    console.log(`[server] Alphamentals API → http://${addressHost}:${port}`);
+    console.log(`[alphamentals-api] starting`);
+    console.log(`[alphamentals-api] host=${HOST}`);
+    console.log(`[alphamentals-api] port=${port}`);
+    console.log(`[alphamentals-api] cors origins loaded: ${ALLOWED_ORIGIN_STRINGS.join(', ')}`);
+
+    const bridgeDiag = getBridgeConfigDiagnostics();
+    console.log(`[alphamentals-api] routes registered`);
+    console.log(`[alphamentals-api] mt5 service initialized (bridge configured: ${bridgeDiag.mt5BridgeUrlConfigured})`);
+
     await writeDiscoveryManifest(port);
     validateMarketDataEnv();
-    console.log('[env] MT5_BRIDGE_URL present:', Boolean(process.env.MT5_BRIDGE_URL));
-    console.log('[env] MT5_BRIDGE_API_KEY present:', Boolean(process.env.MT5_BRIDGE_API_KEY));
-    console.log('[env] MT5_BRIDGE_URL value:', process.env.MT5_BRIDGE_URL ?? null);
-    console.log('[server] MT5 bridge config diagnostics', {
-      mt5BridgeUrlConfigured: getBridgeConfigDiagnostics().mt5BridgeUrlConfigured,
-      mt5BridgeApiKeyConfigured: getBridgeConfigDiagnostics().mt5BridgeApiKeyConfigured,
-    });
+
+    console.log(`[env] MT5_BRIDGE_URL present: ${Boolean(process.env.MT5_BRIDGE_URL)}`);
+    console.log(`[env] MT5_BRIDGE_API_KEY present: ${Boolean(process.env.MT5_BRIDGE_API_KEY)}`);
     logOpenAIConfiguration();
-    if (!process.env.MYFXBOOK_EMAIL) console.warn('[server] ⚠️  MYFXBOOK_EMAIL not set — demo calendar data will be used');
-    if (IS_VERCEL) {
-      console.warn('[server] Vercel detected — background monitors and scheduled jobs are disabled');
-      return;
-    }
+
+    if (!process.env.MYFXBOOK_EMAIL) console.warn('[alphamentals-api] MYFXBOOK_EMAIL not set — demo calendar data will be used');
+
     const telegramValidation = getTelegramStartupValidationMessage();
     if (telegramValidation) {
-      console.warn(`[Telegram] ${telegramValidation}`);
+      console.warn(`[telegram] ${telegramValidation}`);
     } else {
       await logTelegramStartupDiagnostics();
       void startTelegramMonitoring(async (message) => {

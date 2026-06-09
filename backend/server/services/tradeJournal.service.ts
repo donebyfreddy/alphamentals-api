@@ -7,7 +7,7 @@ import { createNotification } from './notification.service.js';
 export type Direction = 'LONG' | 'SHORT' | 'BUY' | 'SELL';
 export type TradeStatus = 'OPEN' | 'CLOSED' | 'CANCELLED' | 'PARTIAL';
 export type Session = 'LONDON' | 'NEW_YORK' | 'ASIA' | 'LONDON_NY_OVERLAP' | 'CUSTOM';
-export type Emotion = 'CALM' | 'CONFIDENT' | 'ANXIOUS' | 'FEARFUL' | 'GREEDY' | 'REVENGE' | 'FOMO' | 'NEUTRAL' | 'EXCITED' | 'FRUSTRATED';
+export type Emotion = 'CALM' | 'CONFIDENT' | 'ANXIOUS' | 'FEARFUL' | 'GREEDY' | 'REVENGE' | 'FOMO' | 'NEUTRAL' | 'EXCITED' | 'FRUSTRATED' | 'FOCUSED' | 'ANGRY' | 'IMPATIENT' | 'TIRED' | 'OVERCONFIDENT' | 'HESITANT' | 'STRESSED' | 'DETACHED' | 'EMOTIONAL' | 'SATISFIED' | 'DISAPPOINTED' | 'MOTIVATED' | 'REGRETFUL';
 export type MistakeTag = 'REVENGE_TRADE' | 'FOMO_ENTRY' | 'MOVED_STOP' | 'NO_HTF_ALIGNMENT' | 'LATE_ENTRY' | 'CHASED_PRICE' | 'NO_CONFIRMATION' | 'OVER_LEVERAGED' | 'TRADED_RED_NEWS' | 'WRONG_SESSION' | 'EMOTIONAL_EXIT' | 'EARLY_EXIT' | 'NO_PLAN' | 'BAD_RR' | 'OVERTRADED' | 'WIDENED_STOP';
 
 export interface CreateTradeInput {

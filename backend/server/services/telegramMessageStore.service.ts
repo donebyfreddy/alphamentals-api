@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { WebSocketLikeConstructor } from '@supabase/realtime-js';
 import ws from 'ws';
+
+const wsTransport = ws as unknown as WebSocketLikeConstructor;
 import { checkDatabaseConnection, execute, isDatabaseConfigured, isDatabaseConnectionError, query } from '../lib/db.js';
 import type { TelegramAttachmentMetadata, TelegramMessageRecord, TelegramReplyInfo } from '../types/telegram.js';
 import type { ParsedTelegramSignal } from '../../../src/utils/telegram/parseTelegramSignal.js';
@@ -23,7 +26,7 @@ function getSupabaseClient(): SupabaseClient | null {
     supabaseClient = null;
     return null;
   }
-  supabaseClient = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false }, realtime: { transport: ws } });
+  supabaseClient = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false }, realtime: { transport: wsTransport } });
   return supabaseClient;
 }
 

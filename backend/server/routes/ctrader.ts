@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { connectCTrader, syncCTrader, disconnectCTrader } from '../services/ctrader.service.js';
+import { connectCTrader, syncCTrader, disconnectCTrader, type CTraderCredentials } from '../services/ctrader.service.js';
 
 export const ctraderRouter = Router();
 
@@ -21,7 +21,7 @@ ctraderRouter.post('/connect', async (req, res) => {
     return;
   }
   try {
-    const result = await connectCTrader(parsed.data);
+    const result = await connectCTrader(parsed.data as CTraderCredentials);
     res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
     res.status(500).json({

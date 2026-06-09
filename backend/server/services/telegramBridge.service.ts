@@ -789,7 +789,9 @@ export async function testTelegramConnection(): Promise<TelegramConnectionTestRe
       messagesFetched: 0,
       currentPhase: bridgeError.phase,
       lastMessageDate: null,
-      account: bridgeError.account ?? null,
+      account: bridgeError.account?.id && bridgeError.account?.username && bridgeError.account?.displayName
+        ? { id: bridgeError.account.id, username: bridgeError.account.username, displayName: bridgeError.account.displayName }
+        : null,
       targetChat: {
         id: bridgeError.targetChatInfo?.id ?? null,
         title: bridgeError.targetChatInfo?.title ?? null,
@@ -960,7 +962,7 @@ export async function runTelegramDoctor(): Promise<{
   // Run doctor command via the resolved executable
   try {
     const result = await tryRunPythonCommand(pythonExecutable ?? 'python3', ['doctor', '--json'], 15_000);
-    const doctor = parseJsonLine<DoctorCommandSuccess>(result.stdout.trim().split('\n').findLast(Boolean) ?? '');
+    const doctor = parseJsonLine<DoctorCommandSuccess>(result.stdout.trim().split('\n').reverse().find(Boolean) ?? '');
     return {
       python_found: true,
       python_version: pythonVersion,

@@ -362,17 +362,18 @@ async function getPsychologyByPhase(userId, phase) {
         during: 'duringTradeEmotion', post: 'postTradeEmotion', pre: 'preTradeEmotion',
     };
     const column = columnByPhase[phase];
-    const { data: trades } = await supabase_js_1.supabase
+    const { data: rawTrades } = await supabase_js_1.supabase
         .from('trades').select(`${column}, pnl, psychologyScore`)
         .eq('userId', userId).eq('status', 'CLOSED').eq('reviewStatus', 'COMPLETE');
+    const trades = (rawTrades ?? []);
     const map = new Map();
-    for (const t of trades ?? []) {
+    for (const t of trades) {
         const emotion = t[column];
         if (!emotion)
             continue;
         const e = map.get(emotion) ?? { wins: 0, total: 0, pnl: 0, scores: [] };
         e.total++;
-        e.pnl += (t.pnl ?? 0);
+        e.pnl += t.pnl ?? 0;
         if ((t.pnl ?? 0) > 0)
             e.wins++;
         if (t.psychologyScore != null)

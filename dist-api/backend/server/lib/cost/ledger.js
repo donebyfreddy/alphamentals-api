@@ -36,8 +36,8 @@ function recordCost(event) {
         currency: 'USD',
         metadata_json: event.metadata ?? {},
     };
-    // Fire and forget
-    supabase_js_1.supabase
+    // Fire and forget — wrap in Promise.resolve so .catch() is always available
+    Promise.resolve(supabase_js_1.supabase
         .from('api_cost_ledger')
         .insert(row)
         .then(({ error }) => {
@@ -54,8 +54,7 @@ function recordCost(event) {
                 status: event.status,
             });
         }
-    })
-        .catch((err) => {
+    })).catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
         console.warn('[cost-ledger] unexpected error:', message);
     });

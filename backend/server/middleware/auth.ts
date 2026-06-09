@@ -1,6 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { WebSocketLikeConstructor } from '@supabase/realtime-js';
 import ws from 'ws';
+
+const wsTransport = ws as unknown as WebSocketLikeConstructor;
 
 // Lazy init so env vars are read after dotenv.config() runs in server/index.ts
 let _client: SupabaseClient | null = null;
@@ -12,7 +15,7 @@ function getAdminClient(): SupabaseClient {
     if (!url || !key) {
       throw new Error('Supabase URL and SUPABASE_SECRET_KEY must be set in .env');
     }
-    _client = createClient(url, key, { realtime: { transport: ws } });
+    _client = createClient(url, key, { realtime: { transport: wsTransport } });
   }
   return _client;
 }

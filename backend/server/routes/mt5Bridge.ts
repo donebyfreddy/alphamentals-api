@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { mt5BridgeService } from '../services/mt5Bridge.service.js';
+import { mt5BridgeService, type Mt5BridgeConnectPayload } from '../services/mt5Bridge.service.js';
 
 export const mt5BridgeRouter = Router();
 
@@ -52,7 +52,7 @@ mt5BridgeRouter.post('/accounts/connect', async (req, res) => {
   }
 
   try {
-    const response = await mt5BridgeService.connectAccount(parsed.data);
+    const response = await mt5BridgeService.connectAccount(parsed.data as Mt5BridgeConnectPayload);
     res.json({ ok: true, ...response });
   } catch (error) {
     res.status(502).json({ ok: false, message: error instanceof Error ? error.message : 'Bridge connect failed.' });

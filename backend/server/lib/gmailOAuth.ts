@@ -1,8 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, '../data/gmail-config.json');
 
 export type GmailConnectionStatus = 'not_configured' | 'configured' | 'connected' | 'error';

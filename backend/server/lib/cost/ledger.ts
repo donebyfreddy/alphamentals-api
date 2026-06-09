@@ -52,28 +52,29 @@ export function recordCost(event: CostEvent): void {
     metadata_json:      event.metadata ?? {},
   };
 
-  // Fire and forget
-  supabase
-    .from('api_cost_ledger')
-    .insert(row)
-    .then(({ error }) => {
-      if (error) {
-        console.warn('[cost-ledger] insert failed:', error.message);
-      } else {
-        const cost = event.totalCostUsd ?? 0;
-        console.info('[cost-ledger] recorded', {
-          provider: event.provider,
-          feature:  event.feature ?? '-',
-          model:    event.model   ?? '-',
-          cost:     `$${cost.toFixed(6)}`,
-          status:   event.status,
-        });
-      }
-    })
-    .catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn('[cost-ledger] unexpected error:', message);
-    });
+  // Fire and forget — wrap in Promise.resolve so .catch() is always available
+  Promise.resolve(
+    supabase
+      .from('api_cost_ledger')
+      .insert(row)
+      .then(({ error }) => {
+        if (error) {
+          console.warn('[cost-ledger] insert failed:', error.message);
+        } else {
+          const cost = event.totalCostUsd ?? 0;
+          console.info('[cost-ledger] recorded', {
+            provider: event.provider,
+            feature:  event.feature ?? '-',
+            model:    event.model   ?? '-',
+            cost:     `$${cost.toFixed(6)}`,
+            status:   event.status,
+          });
+        }
+      }),
+  ).catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[cost-ledger] unexpected error:', message);
+  });
 }
 
 export interface LedgerQuery {

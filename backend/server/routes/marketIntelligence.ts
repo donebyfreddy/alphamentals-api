@@ -184,7 +184,7 @@ marketIntelligenceRouter.post('/refresh', async (req, res) => {
     res.json({
       ok: true,
       lastUpdated: overview.lastUpdated,
-      generatedAt: aiResult.generatedAt ?? aiResult.analysis?.generatedAt ?? null,
+      generatedAt: aiResult.analysis?.generatedAt ?? null,
       timezone: 'Europe/Madrid',
       newsCount: overview.latestNews.length,
       eventCount: overview.upcomingEvents.length,

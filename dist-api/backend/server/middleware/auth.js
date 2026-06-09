@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.requireAuth = requireAuth;
 const supabase_js_1 = require("@supabase/supabase-js");
 const ws_1 = __importDefault(require("ws"));
+const wsTransport = ws_1.default;
 // Lazy init so env vars are read after dotenv.config() runs in server/index.ts
 let _client = null;
 function getAdminClient() {
@@ -15,7 +16,7 @@ function getAdminClient() {
         if (!url || !key) {
             throw new Error('Supabase URL and SUPABASE_SECRET_KEY must be set in .env');
         }
-        _client = (0, supabase_js_1.createClient)(url, key, { realtime: { transport: ws_1.default } });
+        _client = (0, supabase_js_1.createClient)(url, key, { realtime: { transport: wsTransport } });
     }
     return _client;
 }

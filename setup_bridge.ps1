@@ -52,6 +52,11 @@ Write-Host "`n[4/9] Building backend (dist-api/backend/server/index.js)..." -For
 
 npm run build:api
 
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  ERROR: TypeScript build failed. Fix the errors above before starting PM2." -ForegroundColor Red
+    exit 1
+}
+
 if (-not (Test-Path "dist-api\backend\server\index.js")) {
     Write-Host "  ERROR: Build output not found. Check TypeScript errors above." -ForegroundColor Red
     exit 1
@@ -181,4 +186,3 @@ Write-Host ""
 Write-Host "External tests (run from another machine):" -ForegroundColor Yellow
 Write-Host '  curl.exe http://217.71.203.77:3001/health'
 Write-Host '  curl.exe "http://217.71.203.77:3001/api/market-data/quotes?symbols=XAUUSD"'
-```

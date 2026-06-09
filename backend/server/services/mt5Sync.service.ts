@@ -228,9 +228,11 @@ async function upsertJournalTrade(params: {
   externalOrderId?: string | null;
   externalPositionId?: string | null;
 }): Promise<'created' | 'updated'> {
-  const isClosedTrade = 'closePrice' in params.mt5Trade;
-  const closePrice = isClosedTrade ? params.mt5Trade.closePrice : null;
-  const closeTime = isClosedTrade ? params.mt5Trade.closeTime : null;
+  const isClosedTrade = (
+    t: NormalizedMt5ClosedTrade | NormalizedMt5OpenTrade,
+  ): t is NormalizedMt5ClosedTrade => 'closePrice' in t;
+  const closePrice = isClosedTrade(params.mt5Trade) ? params.mt5Trade.closePrice : null;
+  const closeTime = isClosedTrade(params.mt5Trade) ? params.mt5Trade.closeTime : null;
   const analysis = buildTradeAnalysis({
     symbol: params.mt5Trade.symbol,
     direction: params.mt5Trade.direction,

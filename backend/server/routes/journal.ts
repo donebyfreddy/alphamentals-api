@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import * as journalService from '../services/tradeJournal.service.js';
-import type { Direction, TradeStatus, Session, CreateTradeInput } from '../services/tradeJournal.service.js';
+import type { Direction, TradeStatus, Session, CreateTradeInput, CloseTradeInput, ReviewInput } from '../services/tradeJournal.service.js';
 import { reviewTrade } from '../services/aiCoach.service.js';
 import { validateTradeRisk } from '../services/riskValidator.service.js';
 import { z } from 'zod';
@@ -167,7 +167,7 @@ router.patch('/trades/:id/close', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Invalid input', details: parsed.error.flatten() });
       return;
     }
-    const trade = await journalService.closeTrade(userId, param(req.params.id), parsed.data);
+    const trade = await journalService.closeTrade(userId, param(req.params.id), parsed.data as CloseTradeInput);
     res.json(trade);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -194,7 +194,7 @@ router.patch('/trades/:id/review', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Invalid input', details: parsed.error.flatten() });
       return;
     }
-    const result = await journalService.updateTradeReview(userId, param(req.params.id), parsed.data);
+    const result = await journalService.updateTradeReview(userId, param(req.params.id), parsed.data as ReviewInput);
     // When the review is complete, generate the AI coach comment in the background
     // so the response (with deterministic scores) returns immediately.
     if (result.trade?.reviewStatus === 'COMPLETE') {

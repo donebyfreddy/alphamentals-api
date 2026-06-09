@@ -4,6 +4,10 @@ import { z } from 'zod';
 
 const router = Router();
 
+function param(value: string | string[]): string {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 const ChecklistSchema = z.object({
   symbol: z.string().min(3),
   htfBiasAligned: z.boolean(),
@@ -29,7 +33,7 @@ router.post('/', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Invalid input', details: parsed.error.flatten() });
       return;
     }
-    const checklist = await checklistService.createChecklist(userId, parsed.data);
+    const checklist = await checklistService.createChecklist(userId, parsed.data as checklistService.ChecklistInput);
     res.status(201).json(checklist);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -45,7 +49,7 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const userId = process.env.DEFAULT_USER_ID!;
-    res.json(await checklistService.getChecklistById(userId, req.params.id));
+    res.json(await checklistService.getChecklistById(userId, param(req.params.id)));
   } catch (err: any) {
     res.status(404).json({ error: err.message });
   }

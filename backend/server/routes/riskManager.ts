@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { calculateRisk } from '../services/riskManager.service.js';
+import { calculateRisk, type RiskCalcInput } from '../services/riskManager.service.js';
 import { z } from 'zod';
 
 const router = Router();
@@ -19,7 +19,7 @@ router.post('/calculate', (req: Request, res: Response) => {
     res.status(400).json({ error: 'Invalid input', details: parsed.error.flatten() });
     return;
   }
-  res.json(calculateRisk(parsed.data));
+  res.json(calculateRisk(parsed.data as RiskCalcInput));
 });
 
 export default router;

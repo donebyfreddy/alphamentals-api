@@ -37,6 +37,9 @@ const express_1 = require("express");
 const checklistService = __importStar(require("../services/checklist.service.js"));
 const zod_1 = require("zod");
 const router = (0, express_1.Router)();
+function param(value) {
+    return Array.isArray(value) ? value[0] : value;
+}
 const ChecklistSchema = zod_1.z.object({
     symbol: zod_1.z.string().min(3),
     htfBiasAligned: zod_1.z.boolean(),
@@ -76,7 +79,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
     try {
         const userId = process.env.DEFAULT_USER_ID;
-        res.json(await checklistService.getChecklistById(userId, req.params.id));
+        res.json(await checklistService.getChecklistById(userId, param(req.params.id)));
     }
     catch (err) {
         res.status(404).json({ error: err.message });

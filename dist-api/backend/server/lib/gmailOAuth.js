@@ -11,8 +11,6 @@ exports.disconnectGmail = disconnectGmail;
 exports.loadGmailConfigIntoEnv = loadGmailConfigIntoEnv;
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
-const node_url_1 = require("node:url");
-const __dirname = node_path_1.default.dirname((0, node_url_1.fileURLToPath)(import.meta.url));
 const CONFIG_PATH = node_path_1.default.join(__dirname, '../data/gmail-config.json');
 /** Derives the OAuth2 redirect URI from env vars or falls back to the standard callback path. */
 function deriveRedirectUri() {

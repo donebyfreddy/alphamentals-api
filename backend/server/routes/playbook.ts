@@ -4,6 +4,10 @@ import * as playbook from '../services/playbook.service.js';
 
 const router = Router();
 
+function param(value: string | string[]): string {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 const SetupSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(2000).optional(),
@@ -38,7 +42,7 @@ router.post('/setups', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Invalid input', details: parsed.error.flatten() });
       return;
     }
-    const setup = await playbook.createSetup(userId, parsed.data);
+    const setup = await playbook.createSetup(userId, parsed.data as playbook.SetupInput);
     res.status(201).json(setup);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -64,7 +68,7 @@ router.patch('/setups/:id', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Invalid input', details: parsed.error.flatten() });
       return;
     }
-    const setup = await playbook.updateSetup(userId, req.params.id, parsed.data);
+    const setup = await playbook.updateSetup(userId, param(req.params.id), parsed.data);
     res.json(setup);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -75,7 +79,7 @@ router.patch('/setups/:id', async (req: Request, res: Response) => {
 router.delete('/setups/:id', async (req: Request, res: Response) => {
   try {
     const userId = process.env.DEFAULT_USER_ID ?? '';
-    await playbook.deleteSetup(userId, req.params.id);
+    await playbook.deleteSetup(userId, param(req.params.id));
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

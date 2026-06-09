@@ -49,6 +49,7 @@ export interface TelegramTradeValidationResult {
   executionValidityScore: number;
   aiVerdictConfidence: number;
   rejectionConfidence: number;
+  confidence: number;
   primaryReason: string;
   summary: string;
   reasoning: string;

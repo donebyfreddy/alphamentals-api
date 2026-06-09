@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { connectSaxo, syncSaxo, disconnectSaxo } from '../services/saxo.service.js';
+import { connectSaxo, syncSaxo, disconnectSaxo, type SaxoCredentials } from '../services/saxo.service.js';
 
 export const saxoRouter = Router();
 
@@ -20,7 +20,7 @@ saxoRouter.post('/connect', async (req, res) => {
     return;
   }
   try {
-    const result = await connectSaxo(parsed.data);
+    const result = await connectSaxo(parsed.data as SaxoCredentials);
     res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
     res.status(500).json({

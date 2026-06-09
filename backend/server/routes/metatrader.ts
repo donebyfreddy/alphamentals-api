@@ -8,6 +8,7 @@ import {
   mt5GetSymbols,
   mt5GetTick,
   mt5GetHistoricalData,
+  type MetaTraderCredentials,
 } from '../services/metaTrader.service.js';
 
 export const metaTraderRouter = Router();
@@ -37,7 +38,7 @@ metaTraderRouter.post('/connect', async (req, res) => {
   }
 
   try {
-    const result = await connectMetaTrader(parsed.data);
+    const result = await connectMetaTrader(parsed.data as MetaTraderCredentials);
     res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
     res.status(500).json({
@@ -132,7 +133,7 @@ metaTraderRouter.post('/test-connection', async (req, res) => {
   }
 
   try {
-    const result = await connectMetaTrader(parsed.data);
+    const result = await connectMetaTrader(parsed.data as MetaTraderCredentials);
     res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
     res.status(500).json({

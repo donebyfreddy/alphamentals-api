@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { executeAccountableTrade } from '../services/tradeExecution.service.js';
+import type { TradeExecutionPlan } from '../../../src/lib/tradeExecutionRules.js';
 
 export const tradeExecutionRouter = Router();
 
@@ -131,7 +132,7 @@ tradeExecutionRouter.post('/execute', async (req, res) => {
   }
 
   try {
-    const result = await executeAccountableTrade(parsed.data);
+    const result = await executeAccountableTrade(parsed.data as TradeExecutionPlan);
     res.status(result.success ? 200 : 422).json(result);
   } catch (error) {
     res.status(500).json({

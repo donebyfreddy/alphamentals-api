@@ -37,6 +37,6 @@ export function parseTelegramSignal(text: string, _context?: unknown): ParsedTel
   };
 }
 
-export function isTelegramLimitOrderSignal(_textOrSignal: unknown, _signal?: ParsedTelegramSignal): boolean {
+export function isTelegramLimitOrderSignal(_textOrSignal: unknown, _signal?: Pick<ParsedTelegramSignal, 'messageType' | 'direction'>): boolean {
   return false;
 }

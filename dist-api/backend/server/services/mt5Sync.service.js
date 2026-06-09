@@ -159,9 +159,9 @@ function tradeTags(symbol, status) {
     return ['MT5', 'AUTO_IMPORTED', status, symbol].filter(Boolean);
 }
 async function upsertJournalTrade(params) {
-    const isClosedTrade = 'closePrice' in params.mt5Trade;
-    const closePrice = isClosedTrade ? params.mt5Trade.closePrice : null;
-    const closeTime = isClosedTrade ? params.mt5Trade.closeTime : null;
+    const isClosedTrade = (t) => 'closePrice' in t;
+    const closePrice = isClosedTrade(params.mt5Trade) ? params.mt5Trade.closePrice : null;
+    const closeTime = isClosedTrade(params.mt5Trade) ? params.mt5Trade.closeTime : null;
     const analysis = (0, mt5Sync_helpers_js_1.buildTradeAnalysis)({
         symbol: params.mt5Trade.symbol,
         direction: params.mt5Trade.direction,

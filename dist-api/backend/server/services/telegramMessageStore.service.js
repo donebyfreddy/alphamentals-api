@@ -16,6 +16,7 @@ exports.isTelegramStoreUnavailable = isTelegramStoreUnavailable;
 const node_crypto_1 = require("node:crypto");
 const supabase_js_1 = require("@supabase/supabase-js");
 const ws_1 = __importDefault(require("ws"));
+const wsTransport = ws_1.default;
 const db_js_1 = require("../lib/db.js");
 const TABLE = 'telegram_messages';
 // ── Supabase REST fallback ───────────────────────────────────────────────────
@@ -32,7 +33,7 @@ function getSupabaseClient() {
         supabaseClient = null;
         return null;
     }
-    supabaseClient = (0, supabase_js_1.createClient)(url, key, { auth: { autoRefreshToken: false, persistSession: false }, realtime: { transport: ws_1.default } });
+    supabaseClient = (0, supabase_js_1.createClient)(url, key, { auth: { autoRefreshToken: false, persistSession: false }, realtime: { transport: wsTransport } });
     return supabaseClient;
 }
 function isSupabaseConfigured() {

@@ -357,7 +357,7 @@ telegramRouter.post('/messages/:id/send-analysis', async (req, res) => {
   try {
     const result = await sendEmailForMessage(req.params.id);
     if (!result.sent) {
-      return res.status(422).json({ success: false, error: result.error });
+      return res.status(422).json({ success: false, error: (result as { sent: false; error: string }).error });
     }
     return res.json({
       success: true,

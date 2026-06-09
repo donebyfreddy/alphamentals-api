@@ -375,19 +375,21 @@ export async function getPsychologyByPhase(userId: string, phase: 'pre' | 'durin
     during: 'duringTradeEmotion', post: 'postTradeEmotion', pre: 'preTradeEmotion',
   };
   const column = columnByPhase[phase];
-  const { data: trades } = await supabase
+  type TradeRow = { pnl: number | null; psychologyScore: number | null; [key: string]: unknown };
+  const { data: rawTrades } = await supabase
     .from('trades').select(`${column}, pnl, psychologyScore`)
     .eq('userId', userId).eq('status', 'CLOSED').eq('reviewStatus', 'COMPLETE');
+  const trades = (rawTrades ?? []) as unknown as TradeRow[];
 
   const map = new Map<string, { wins: number; total: number; pnl: number; scores: number[] }>();
-  for (const t of trades ?? []) {
-    const emotion = (t as Record<string, unknown>)[column] as string | null;
+  for (const t of trades) {
+    const emotion = t[column] as string | null;
     if (!emotion) continue;
     const e = map.get(emotion) ?? { wins: 0, total: 0, pnl: 0, scores: [] };
     e.total++;
-    e.pnl += (t.pnl ?? 0) as number;
+    e.pnl += t.pnl ?? 0;
     if ((t.pnl ?? 0) > 0) e.wins++;
-    if (t.psychologyScore != null) e.scores.push(t.psychologyScore as number);
+    if (t.psychologyScore != null) e.scores.push(t.psychologyScore);
     map.set(emotion, e);
   }
 

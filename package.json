@@ -9,6 +9,7 @@
     "start": "node dist/src/index.js",
     "dev:api": "tsx backend/server/index.ts",
     "build:api": "tsc -p tsconfig.backend.json",
+    "build:api:bundle": "npx esbuild backend/server/index.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist-api/backend/server/index.js",
     "start:api": "node dist-api/backend/server/index.js"
   },
   "dependencies": {
@@ -28,6 +29,7 @@
     "@types/node": "^22.15.30",
     "@types/pg": "^8.11.6",
     "@types/ws": "^8.5.12",
+    "esbuild": "^0.25.12",
     "tsx": "^4.21.0",
     "typescript": "^5.8.3"
   }

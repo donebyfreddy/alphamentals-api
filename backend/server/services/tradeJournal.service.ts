@@ -4,7 +4,7 @@ import { computeScores } from './tradeScoring.service.js';
 import { recomputeSetupStats } from './playbook.service.js';
 import { createNotification } from './notification.service.js';
 
-export type Direction = 'LONG' | 'SHORT';
+export type Direction = 'LONG' | 'SHORT' | 'BUY' | 'SELL';
 export type TradeStatus = 'OPEN' | 'CLOSED' | 'CANCELLED' | 'PARTIAL';
 export type Session = 'LONDON' | 'NEW_YORK' | 'ASIA' | 'LONDON_NY_OVERLAP' | 'CUSTOM';
 export type Emotion = 'CALM' | 'CONFIDENT' | 'ANXIOUS' | 'FEARFUL' | 'GREEDY' | 'REVENGE' | 'FOMO' | 'NEUTRAL' | 'EXCITED' | 'FRUSTRATED';

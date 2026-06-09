@@ -1,9 +1,9 @@
 # VPS Deployment Guide — AlphaMentals API
 
 Target architecture:
-- **Frontend**: Vercel (`https://app.alphamentals.com`)
-- **API server**: VPS at `https://api.alphamentals.com` (this guide)
-- **MT5 bridge**: VPS, internal port 3001
+- **Frontend**: Vercel (`https://alphamentals-dashboard.vercel.app`)
+- **API server**: `https://api.alphamentals.com` → this Express process on port 3001
+- **MT5 bridge**: Python service on port 8001 (same VPS, internal only)
 - **Database**: Supabase
 
 ---
@@ -45,7 +45,6 @@ git pull origin main
 
 ## C. Install Node dependencies
 
-Run once from the **project root** (all dependencies are in the root `package.json`):
 ```bash
 npm ci
 ```
@@ -60,52 +59,50 @@ nano .env          # fill in real values
 ```
 
 Key variables:
+
 | Variable | Value |
 |---|---|
-| `PORT` | `3000` (API server — does NOT conflict with MT5 bridge on 3001) |
-| `FRONTEND_ORIGIN` | `https://app.alphamentals.com` |
-| `MT5_BRIDGE_URL` | `http://127.0.0.1:3001` |
-| `MT5_BRIDGE_API_KEY` | must match `BRIDGE_API_KEY` in MT5 bridge process |
+| `API_PORT` | `3001` |
+| `API_HOST` | `0.0.0.0` |
+| `FRONTEND_ORIGIN` | `https://alphamentals-dashboard.vercel.app` |
+| `MT5_BRIDGE_URL` | `http://127.0.0.1:8001` (Python MT5 bridge) |
+| `MT5_BRIDGE_API_KEY` | shared secret with the MT5 Python bridge |
+| `VPS_API_KEY` | same value as `MT5_BRIDGE_API_KEY` |
 | `SUPABASE_URL` | your Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | service role key (never expose to frontend) |
-
-The root `.env` is loaded automatically by dotenv on server startup.
+| `FINNHUB_API_KEY` | for economic calendar |
+| `TRADING_ECONOMICS_API_KEY` | for economic calendar |
 
 ---
 
 ## E. Build TypeScript
 
+Using the TypeScript compiler (recommended for type checking):
 ```bash
 npm run build:api
 ```
 
-This compiles `backend/server/` and shared `src/` modules into `dist-api/`.
+Or using esbuild (faster, for production when types are already verified):
+```bash
+npm run build:api:bundle
+```
+
+Both output to `dist-api/backend/server/index.js`.
 
 ---
 
 ## F. Start with PM2
 
-### API server (this service)
 ```bash
-pm2 start dist-api/backend/server/index.js \
-  --name alphamentals-api \
-  --env production
+pm2 start ecosystem.config.js
 pm2 save
 pm2 startup
 ```
 
-### MT5 bridge (runs alongside)
-```bash
-npm run build                                   # compile root src/
-pm2 start dist/src/index.js \
-  --name alphamentals-mt5-bridge \
-  --env production \
-  --env PORT=3001 \
-  --env BRIDGE_API_KEY=<same-as-MT5_BRIDGE_API_KEY>
-pm2 save
-```
+The `ecosystem.config.js` only starts the **API server** (port 3001).
+The **Python MT5 bridge** (port 8001) must be started separately.
 
-Check both are running:
+Check status:
 ```bash
 pm2 list
 pm2 logs alphamentals-api --lines 50
@@ -123,12 +120,15 @@ server {
     server_name api.alphamentals.com;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
         proxy_read_timeout 120s;
     }
 }
@@ -150,8 +150,6 @@ sudo systemctl reload nginx
 sudo certbot --nginx -d api.alphamentals.com
 ```
 
-Certbot will edit the nginx config automatically to add HTTPS.
-
 Test renewal:
 ```bash
 sudo certbot renew --dry-run
@@ -159,42 +157,48 @@ sudo certbot renew --dry-run
 
 ---
 
-## I. Vercel frontend — environment variable
+## I. Vercel frontend — environment variables
 
-In the Vercel dashboard for your frontend project, set:
+In the Vercel dashboard for `alphamentals-dashboard`, set:
 
 ```
 NEXT_PUBLIC_API_BASE_URL=https://api.alphamentals.com
+VPS_API_KEY=<same value as on the VPS>
 ```
-
-Remove any references to:
-- Cloudflare Worker URLs
-- Render URLs
-- `http://217.71.203.77:...` raw IP addresses
-- `http://localhost:...`
 
 ---
 
 ## J. Verify deployment
 
-Run these from any machine after the VPS is up:
-
 ```bash
-curl -i https://api.alphamentals.com/health
+# Health check (no auth required)
 curl -i https://api.alphamentals.com/api/health
-curl -i "https://api.alphamentals.com/api/market-data/quotes?symbols=XAUUSD,EURUSD,GBPUSD,DXY,USOIL"
+
+# Ping
+curl -i https://api.alphamentals.com/api/ping
+
+# Economic calendar (no auth required)
+curl -i "https://api.alphamentals.com/api/economic-calendar?from=2026-06-09&to=2026-06-15"
+
+# Market data quotes (no auth required)
+curl -i "https://api.alphamentals.com/api/market-data/quotes?symbols=XAUUSD,EURUSD,GBPUSD"
+
+# MT5 status
 curl -i https://api.alphamentals.com/api/mt5/status
+
+# Journal stats
 curl -i https://api.alphamentals.com/api/journal/stats
-curl -i "https://api.alphamentals.com/api/journal/trades?page=1&limit=25"
-curl -i "https://api.alphamentals.com/api/economic-calendar?from=2026-06-08&to=2026-06-14"
+
+# Unknown route → JSON 404
 curl -i "https://api.alphamentals.com/api/nonexistent-route"
 ```
 
 Expected:
-- Every response has `Content-Type: application/json`
-- `/api/nonexistent-route` returns `{"ok":false,"error":"NOT_FOUND",...}` with HTTP 404
-- `/api/market-data/quotes` returns `{"ok":true,"data":{...}}`
-- All `/api/*` routes return JSON, never HTML
+- `/api/health` → `{"ok":true,"service":"alphamentals-api","kind":"backend",...}`
+- `/api/ping` → `{"ok":true}`
+- `/api/economic-calendar` → `{"ok":true,"data":[...]}`
+- All `/api/*` routes return `Content-Type: application/json`, never HTML
+- Unknown routes return `{"ok":false,"error":"NOT_FOUND",...}` with HTTP 404
 
 ---
 

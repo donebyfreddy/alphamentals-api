@@ -12,5 +12,8 @@ function getActiveSession(_now) {
     return null;
 }
 function getNextSession(_now) {
-    return SESSIONS[1];
+    const next = SESSIONS[1];
+    if (!next)
+        return null;
+    return { session: next, opensInMinutes: 0, closesInMinutes: 60 };
 }

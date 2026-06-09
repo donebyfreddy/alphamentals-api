@@ -53,26 +53,33 @@ const app = express();
 const HOST = process.env.API_HOST ?? '0.0.0.0';
 const IS_VERCEL = process.env.VERCEL === '1';
 const BACKEND_DISCOVERY_FILE = process.env.ALPHAMENTALS_BACKEND_DISCOVERY_FILE ?? '/tmp/alphamentals-backend-discovery.json';
-const DISCOVERY_PORTS = [3000, 3001, 3002, 3005, 3333, 4000, 5000, 8000, 8080, 8787];
+const DISCOVERY_PORTS = [3001, 3000, 3002, 3005, 3333, 4000, 5000, 8000, 8080, 8787];
 
-const ALLOWED_ORIGINS: string[] = [
+const ALLOWED_ORIGIN_STRINGS: string[] = [
   process.env.FRONTEND_ORIGIN,
   process.env.FRONTEND_ORIGIN_ALT,
+  'https://alphamentals-dashboard.vercel.app',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   'http://localhost:3001',
 ].filter(Boolean) as string[];
 
+const VERCEL_PREVIEW_PATTERN = /^https:\/\/alphamentals-dashboard-[a-z0-9-]+-[a-z0-9]+\.vercel\.app$/;
+
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || ALLOWED_ORIGINS.some((o) => origin === o || origin.endsWith('.vercel.app'))) {
+    if (
+      !origin
+      || ALLOWED_ORIGIN_STRINGS.includes(origin)
+      || VERCEL_PREVIEW_PATTERN.test(origin)
+    ) {
       callback(null, true);
     } else {
       callback(null, false);
     }
   },
   methods: 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-  allowedHeaders: 'Content-Type, Authorization, X-Requested-With',
+  allowedHeaders: 'Content-Type, Authorization, X-Requested-With, x-api-key',
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -116,6 +123,7 @@ app.use('/api/cost', costRouter);
 function sendHealth(_req: express.Request, res: express.Response) {
   const telegram = getTelegramRuntimeState();
   res.json({
+    ok: true,
     service: 'alphamentals-api',
     kind: 'backend',
     status: 'ok',
@@ -130,8 +138,8 @@ function sendHealth(_req: express.Request, res: express.Response) {
 
 app.get('/api/health', sendHealth);
 app.get('/health', sendHealth);
-app.get('/api/ping', (_req, res) => res.json({ status: 'ok' }));
-app.get('/ping', (_req, res) => res.json({ status: 'ok' }));
+app.get('/api/ping', (_req, res) => res.json({ ok: true }));
+app.get('/ping', (_req, res) => res.json({ ok: true }));
 
 // JSON 404 for all unknown /api/* routes — must come after every route registration.
 app.use('/api', (req: express.Request, res: express.Response) => {

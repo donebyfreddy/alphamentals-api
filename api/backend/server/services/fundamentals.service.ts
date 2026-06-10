@@ -19,6 +19,7 @@ import {
 // fundamentalAnalysisService exports are no longer used here; batch prompt is built inline.
 import { calculateRulesBasedBias } from '../../../src/services/fundamentals/rulesBasedBiasEngine.js';
 import { deriveTradeStatus } from '../../../src/services/fundamentals/tradeWarningService.js';
+import { saveLatestNews, saveLatestCalendar } from './marketIntelligencePersistence.service.js';
 
 type PairSymbol =
   | 'XAU/USD' | 'XAG/USD'
@@ -1334,6 +1335,12 @@ export async function refreshFundamentalsData(options?: {
   const now = new Date();
   memoryStore.lastUpdated = now.toISOString();
   memoryStore.lastWarning = buildWarning();
+
+  // Persist to local JSON files as fallback (non-blocking, best-effort)
+  void Promise.all([
+    saveLatestNews(memoryStore.articles),
+    saveLatestCalendar(memoryStore.events),
+  ]).catch((err) => console.warn('[fundamentals] persistence write failed:', err instanceof Error ? err.message : err));
   memoryStore.scheduleMetadata = {
     generatedAt: formatMadridTs(now),
     generatedTimezone: SCHEDULE_TZ,

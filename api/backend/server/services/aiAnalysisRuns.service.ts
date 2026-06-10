@@ -1,6 +1,7 @@
 import * as memCache from '../lib/cache.js';
 import { buildPairAnalysis } from './pairAnalysis.service.js';
 import { getFundamentalsOverview, refreshFundamentalsData } from './fundamentals.service.js';
+import { saveLatestAnalysis, saveMarketIntelligenceRun } from './marketIntelligencePersistence.service.js';
 import {
   createAiAnalysisRun,
   getAiAnalysisSymbols,
@@ -508,6 +509,21 @@ export async function runAiAnalysis(options: {
       const fullLatest = await loadLatestAvailable();
       lastSavedFallback = fullLatest ?? analysis;
       invalidateAnalysisCaches();
+
+      // Local file fallback — survives DB outages (non-blocking)
+      const runId = dbRun?.id ?? `run_${Date.now()}`;
+      void saveLatestAnalysis({
+        runId,
+        generatedAt,
+        generatedTimezone: getAiAnalysisTimezone(),
+        triggerSource,
+        model: getAiAnalysisModel(),
+        symbols: analysis.symbols as Record<string, unknown>,
+        activeSources: (fullLatest?.symbols ? Object.keys(fullLatest.symbols).length : 0),
+        failedSources: 0,
+      }).catch((e) => console.warn('[ai-analysis] local persist failed:', e instanceof Error ? e.message : e));
+      void saveMarketIntelligenceRun(runId, analysis)
+        .catch((e) => console.warn('[ai-analysis] run persist failed:', e instanceof Error ? e.message : e));
 
       if (dbRun) {
         await updateAiAnalysisRun(dbRun.id, {

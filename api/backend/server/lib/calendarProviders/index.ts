@@ -9,12 +9,15 @@
 import { FinnhubProvider } from './finnhubProvider.js';
 import { TradingEconomicsProvider } from './tradingEconomicsProvider.js';
 import { ForexFactoryProvider } from './forexFactoryProvider.js';
+import { MyfxbookProvider } from './myfxbookProvider.js';
 import type { NormalizedCalendarEvent } from './types.js';
 import { APP_EVENT_TIMEZONE, deriveFundamentalEventTiming } from '../../../../src/lib/fundamentalEvents.js';
 
 export type { NormalizedCalendarEvent } from './types.js';
 
+// Priority order: MyFXBook (highest) > Trading Economics > Finnhub > Forex Factory
 const PROVIDERS = [
+  new MyfxbookProvider(),
   new TradingEconomicsProvider(),
   new FinnhubProvider(),
   new ForexFactoryProvider(),
@@ -59,7 +62,7 @@ export async function fetchCalendarFromProviders(
   const available = PROVIDERS.filter((p) => p.isAvailable());
 
   if (available.length === 0) {
-    throw new Error('No calendar providers configured. Set FINNHUB_API_KEY, TRADING_ECONOMICS_API_KEY, or FOREX_FACTORY_ENABLED=true.');
+    throw new Error('No calendar providers configured. Set MYFXBOOK_EMAIL+MYFXBOOK_PASSWORD, FINNHUB_API_KEY, TRADING_ECONOMICS_API_KEY, or FOREX_FACTORY_ENABLED=true.');
   }
 
   const results = await Promise.allSettled(

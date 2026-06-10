@@ -287,6 +287,8 @@ def _normalize_timeframe(timeframe: str) -> int:
         "H1": mt5.TIMEFRAME_H1,
         "H4": mt5.TIMEFRAME_H4,
         "D1": mt5.TIMEFRAME_D1,
+        "W1": mt5.TIMEFRAME_W1,
+        "MN1": mt5.TIMEFRAME_MN1,
     }
     if normalized not in mapping:
         raise MetaTraderServiceError("INVALID_PAYLOAD", f"Unsupported timeframe '{timeframe}'.")

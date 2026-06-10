@@ -4,6 +4,11 @@ import { getLatestAiAnalysisResponse, getLatestAiAnalysisForSymbolResponse, runA
 import { normalizeApiSymbol, normalizeDisplaySymbol } from '../../../src/services/pairs/symbolNormalizer.js';
 import { getTelegramRuntimeState } from '../services/telegramBridge.service.js';
 import { getConfiguredOpenAIApiKey, getOpenAIModel } from '../lib/openaiConfig.js';
+import { getPersistenceStatus } from '../services/marketIntelligencePersistence.service.js';
+import { getActiveProviders } from '../lib/calendarProviders/index.js';
+import { buildPairFundamentalAnalysis, type PairFundamentalAnalysis } from '../services/pairFundamentalsAi.service.js';
+import { buildPairIntelligence } from '../services/pairIntelligence.service.js';
+import { loadPairIntelligence } from '../services/pairIntelligencePersistence.service.js';
 
 export const marketIntelligenceRouter = Router();
 
@@ -289,6 +294,20 @@ marketIntelligenceRouter.get('/fundamentals/:symbol', async (req, res) => {
     await bootstrapFundamentals();
     const symbol = normalizeApiSymbol(req.params.symbol);
     const latestAi = await getLatestAiAnalysisForSymbolResponse(symbol);
+
+    // Detailed structured pair fundamentals — prefer persisted (fast),
+    // fall back to a fresh build if nothing is saved yet.
+    let pairFundamental: PairFundamentalAnalysis | null = null;
+    const persisted = await loadPairIntelligence<{ fundamentals: PairFundamentalAnalysis }>(symbol);
+    if (persisted?.fundamentals) {
+      pairFundamental = persisted.fundamentals;
+    } else {
+      pairFundamental = await buildPairFundamentalAnalysis(symbol).catch((e) => {
+        console.warn('[market-intelligence] pair fundamental build failed:', e instanceof Error ? e.message : e);
+        return null;
+      });
+    }
+
     res.json({
       ok: true,
       symbol,
@@ -297,6 +316,8 @@ marketIntelligenceRouter.get('/fundamentals/:symbol', async (req, res) => {
       analysis: latestAi.analysis
         ? mapPreviewItem(symbol, latestAi.analysis)
         : null,
+      // New: detailed structured fundamental analysis (bias, drivers, conflict, evidence).
+      pairFundamental,
       latestBias: latestAi.analysis
         ? mapPreviewItem(symbol, latestAi.analysis)
         : null,
@@ -305,31 +326,64 @@ marketIntelligenceRouter.get('/fundamentals/:symbol', async (req, res) => {
         : [],
       relatedArticles: filterNewsForSymbol(symbol),
       relatedEvents: filterEventsForSymbol(symbol),
-      generatedAt: latestAi.generatedAt,
+      generatedAt: pairFundamental?.generatedAt ?? latestAi.generatedAt,
       generatedTimezone: latestAi.generatedTimezone,
       triggerSource: latestAi.triggerSource,
       nextScheduledRun: latestAi.nextScheduledRun,
       status: latestAi.status,
-      isStale: latestAi.isStale,
+      isStale: pairFundamental?.dataFreshness.isStale ?? latestAi.isStale,
       timezone: 'Europe/Madrid',
-      updatedAt: latestAi.generatedAt ?? new Date().toISOString(),
+      updatedAt: pairFundamental?.generatedAt ?? latestAi.generatedAt ?? new Date().toISOString(),
     });
   } catch (error) {
     res.status(500).json({ ok: false, error: 'PAIR_ERROR', message: error instanceof Error ? error.message : 'Failed to load pair fundamentals' });
   }
 });
 
+// ── POST /fundamentals/:symbol/regenerate ─────────────────────────────────────
+// Refresh sources → build full pair intelligence (AI + MT5 structure/SMC) → persist.
+marketIntelligenceRouter.post('/fundamentals/:symbol/regenerate', async (req, res) => {
+  const symbol = normalizeApiSymbol(req.params.symbol);
+  const warnings: string[] = [];
+  try {
+    console.log(`[market-intelligence] fundamentals regenerate started for ${symbol}`);
+    try {
+      await refreshFundamentalsData({ triggeredBy: 'manual' });
+    } catch (err) {
+      warnings.push(`Source refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    const intelligence = await buildPairIntelligence(symbol, { forceRefresh: true });
+    res.json({
+      ok: true,
+      symbol: intelligence.symbol,
+      pairFundamental: intelligence.fundamentals,
+      data: intelligence,
+      warnings,
+      updatedAt: intelligence.generatedAt,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to regenerate pair fundamentals';
+    console.error(`[market-intelligence] fundamentals regenerate failed for ${symbol}:`, message);
+    res.status(500).json({ ok: false, error: 'REGENERATE_FAILED', message, warnings });
+  }
+});
+
 // ── GET /diagnostics ──────────────────────────────────────────────────────────
 
-marketIntelligenceRouter.get('/diagnostics', (_req, res) => {
+marketIntelligenceRouter.get('/diagnostics', async (_req, res) => {
   try {
     const overview = getFundamentalsOverview();
     const jobStatus = getRunJobStatus();
     const telegram = getTelegramRuntimeState();
     const openaiKey = getConfiguredOpenAIApiKey();
+    const persistence = await getPersistenceStatus();
+    const calendarProviders = getActiveProviders();
 
     const activeSources = overview.sourceStatus.filter((s) => s.status === 'ok').length;
     const failedSources = overview.sourceStatus.filter((s) => s.status === 'failed').length;
+
+    const myfxbookConfigured = Boolean(process.env.MYFXBOOK_EMAIL && process.env.MYFXBOOK_PASSWORD);
+    const myfxbookProvider = calendarProviders.find((p) => p.name === 'myfxbook');
 
     res.json({
       ok: true,
@@ -342,11 +396,18 @@ marketIntelligenceRouter.get('/diagnostics', (_req, res) => {
         configured: Boolean(openaiKey),
         model: getOpenAIModel(),
       },
+      myfxbook: {
+        configured: myfxbookConfigured,
+        available: myfxbookProvider?.available ?? false,
+        calendarAvailable: myfxbookProvider?.available ?? false,
+        lastError: myfxbookConfigured ? null : 'MYFXBOOK_EMAIL and MYFXBOOK_PASSWORD not set',
+      },
       sources: {
         active: activeSources,
         failed: failedSources,
         total: overview.sourceStatus.length,
         lastRefreshAt: overview.lastUpdated,
+        calendarProviders,
         items: overview.sourceStatus.map((s) => ({
           id: s.id,
           name: s.name,
@@ -369,15 +430,62 @@ marketIntelligenceRouter.get('/diagnostics', (_req, res) => {
       telegram: {
         available: telegram.connected,
         configured: telegram.configured,
-        phase: telegram.currentPhase ?? (telegram.errorPhase ?? 'TELEGRAM_UNAVAILABLE'),
+        phase: telegram.currentPhase ?? telegram.errorPhase ?? 'TELEGRAM_UNAVAILABLE',
         account: telegram.accountUsername ?? 'Unknown',
         targetChat: telegram.targetChat,
         resolvedChat: telegram.targetChatTitle,
         lastError: telegram.error,
+        code: telegram.code,
+        hints: telegram.hints,
+      },
+      persistence: {
+        hasAnalysis: persistence.hasAnalysis,
+        hasCalendar: persistence.hasCalendar,
+        hasNews: persistence.hasNews,
+        lastAnalysisAt: persistence.lastAnalysisAt,
+        dataDir: persistence.dataDir,
+      },
+      frontend: {
+        expectedBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL
+          ?? process.env.VPS_API_BASE_URL
+          ?? `http://localhost:${process.env.PORT ?? 3001}`,
       },
     });
   } catch (error) {
     res.status(500).json({ ok: false, error: 'DIAGNOSTICS_ERROR', message: error instanceof Error ? error.message : 'Unknown error' });
+  }
+});
+
+// ── GET /telegram ─────────────────────────────────────────────────────────────
+
+marketIntelligenceRouter.get('/telegram', (_req, res) => {
+  try {
+    const telegram = getTelegramRuntimeState();
+    res.json({
+      ok: true,
+      configured: telegram.configured,
+      available: telegram.connected,
+      loggedIn: telegram.loggedIn,
+      targetChatAccessible: telegram.targetChatAccessible,
+      targetChatResolved: telegram.targetChatResolved,
+      canReadMessages: telegram.canReadMessages,
+      messagesFetched: telegram.messagesFetched,
+      phase: telegram.currentPhase,
+      errorPhase: telegram.errorPhase,
+      account: telegram.account,
+      accountUsername: telegram.accountUsername,
+      targetChat: telegram.targetChat,
+      targetChatTitle: telegram.targetChatTitle,
+      targetChatType: telegram.targetChatType,
+      lastSyncAt: telegram.lastSyncAt,
+      lastMessageDate: telegram.lastMessageDate,
+      error: telegram.error,
+      code: telegram.code,
+      hints: telegram.hints,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: 'TELEGRAM_STATUS_ERROR', message: error instanceof Error ? error.message : 'Unknown error' });
   }
 });
 

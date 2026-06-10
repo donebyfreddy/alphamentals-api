@@ -192,55 +192,174 @@ def quotes(
 # Candles  — GET /candles?symbol=XAUUSD&timeframe=M15&limit=100
 # ---------------------------------------------------------------------------
 
+def _rates_to_candles(rates) -> list[dict[str, Any]]:
+    return [
+        {
+            "time": datetime.fromtimestamp(int(r["time"]), tz=timezone.utc).isoformat(),
+            "open": float(r["open"]),
+            "high": float(r["high"]),
+            "low": float(r["low"]),
+            "close": float(r["close"]),
+            "tickVolume": float(r["tick_volume"]),
+            "volume": float(r["tick_volume"]),
+            "spread": int(r["spread"]) if "spread" in r.dtype.names else None,
+            "realVolume": float(r["real_volume"]) if "real_volume" in r.dtype.names else 0,
+        }
+        for r in rates
+    ]
+
+
 @app.get("/candles")
 def candles(
     symbol: str = Query(...),
     timeframe: str = Query("M15"),
     limit: int = Query(100, ge=1, le=5000),
+    count: int | None = Query(None, ge=1, le=5000),
     x_api_key: str | None = Header(default=None),
 ):
     _check_api_key(x_api_key, required=False)
     from .services.metatrader_service import _load_mt5, _build_connection_kwargs, _normalize_timeframe, MetaTraderServiceError
 
+    effective_count = count or limit
+
     try:
         tf_const = _normalize_timeframe(timeframe)
     except MetaTraderServiceError as exc:
-        raise HTTPException(status_code=400, detail={"ok": False, "error": exc.message})
+        raise HTTPException(status_code=400, detail={"ok": False, "error": "INVALID_TIMEFRAME", "message": exc.message})
 
     try:
         mt5 = _load_mt5()
     except Exception as exc:
-        return {"ok": False, "symbol": symbol, "candles": [], "error": str(exc)}
+        return {"ok": False, "error": "MT5_NOT_INSTALLED", "symbol": symbol, "candles": [], "message": str(exc)}
 
     try:
         if not mt5.initialize(**_build_connection_kwargs(5000)):
             _, message = mt5.last_error()
-            return {"ok": False, "symbol": symbol, "candles": [], "error": f"MT5 not running: {message}"}
+            return {"ok": False, "error": "MT5_NOT_CONNECTED", "symbol": symbol, "candles": [],
+                    "message": f"MetaTrader 5 terminal is not connected or not initialized: {message}"}
 
-        resolved = _resolve_symbol(mt5, symbol.upper())
+        requested = symbol.upper()
+        resolved = _resolve_symbol(mt5, requested)
         if resolved is None:
-            return {"ok": False, "symbol": symbol, "candles": [], "error": f"Symbol '{symbol}' not found"}
+            candidates = [requested] + _SYMBOL_ALIASES.get(requested, [])
+            return {"ok": False, "error": "MT5_SYMBOL_NOT_FOUND", "symbol": symbol, "candles": [],
+                    "message": f"Could not find {requested} or mapped broker equivalent in MT5 Market Watch.",
+                    "details": {"requested": requested, "candidatesTried": candidates}}
 
-        rates = mt5.copy_rates_from_pos(resolved, tf_const, 0, limit)
+        rates = mt5.copy_rates_from_pos(resolved, tf_const, 0, effective_count)
         if rates is None or len(rates) == 0:
-            return {"ok": True, "symbol": symbol, "timeframe": timeframe, "candles": [], "status": "NO_DATA"}
+            return {"ok": True, "symbol": symbol, "resolvedSymbol": resolved, "timeframe": timeframe,
+                    "count": 0, "source": "mt5-python-bridge", "candles": [], "status": "NO_DATA",
+                    "message": f"No {timeframe} history for {resolved}. Open the chart in MT5 to download history."}
 
+        candle_list = _rates_to_candles(rates)
         return {
             "ok": True,
             "symbol": symbol,
+            "resolvedSymbol": resolved,
             "timeframe": timeframe,
-            "candles": [
-                {
-                    "time": datetime.fromtimestamp(int(r["time"]), tz=timezone.utc).isoformat(),
-                    "open": float(r["open"]),
-                    "high": float(r["high"]),
-                    "low": float(r["low"]),
-                    "close": float(r["close"]),
-                    "volume": float(r["tick_volume"]),
-                }
-                for r in rates
-            ],
+            "count": len(candle_list),
+            "source": "mt5-python-bridge",
+            "candles": candle_list,
         }
+    finally:
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Bulk candles — GET /candles/bulk?symbols=XAUUSD,EURUSD&timeframes=W1,D1,H4&count=300
+# One MT5 initialize for the whole batch — much cheaper than N /candles calls.
+# ---------------------------------------------------------------------------
+
+@app.get("/candles/bulk")
+def candles_bulk(
+    symbols: str = Query(...),
+    timeframes: str = Query("W1,D1,H4,H1,M15,M5"),
+    count: int = Query(300, ge=1, le=5000),
+    x_api_key: str | None = Header(default=None),
+):
+    _check_api_key(x_api_key, required=False)
+    from .services.metatrader_service import _load_mt5, _build_connection_kwargs, _normalize_timeframe, MetaTraderServiceError
+
+    symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    tf_list = [t.strip().upper() for t in timeframes.split(",") if t.strip()]
+    if not symbol_list or not tf_list:
+        raise HTTPException(status_code=400, detail={"ok": False, "error": "INVALID_PAYLOAD", "message": "symbols and timeframes required"})
+
+    try:
+        mt5 = _load_mt5()
+    except Exception as exc:
+        return {"ok": False, "error": "MT5_NOT_INSTALLED", "message": str(exc), "data": {}}
+
+    tf_consts: dict[str, int] = {}
+    for tf in tf_list:
+        try:
+            tf_consts[tf] = _normalize_timeframe(tf)
+        except MetaTraderServiceError as exc:
+            raise HTTPException(status_code=400, detail={"ok": False, "error": "INVALID_TIMEFRAME", "message": exc.message})
+
+    data: dict[str, dict[str, Any]] = {}
+    try:
+        if not mt5.initialize(**_build_connection_kwargs(8000)):
+            _, message = mt5.last_error()
+            return {"ok": False, "error": "MT5_NOT_CONNECTED",
+                    "message": f"MetaTrader 5 terminal is not connected or not initialized: {message}", "data": {}}
+
+        for symbol in symbol_list:
+            resolved = _resolve_symbol(mt5, symbol)
+            per_symbol: dict[str, Any] = {}
+            if resolved is None:
+                for tf in tf_list:
+                    per_symbol[tf] = {"ok": False, "error": "MT5_SYMBOL_NOT_FOUND", "candles": [],
+                                      "message": f"Symbol '{symbol}' not found in MT5 Market Watch."}
+                data[symbol] = per_symbol
+                continue
+            for tf in tf_list:
+                rates = mt5.copy_rates_from_pos(resolved, tf_consts[tf], 0, count)
+                if rates is None or len(rates) == 0:
+                    per_symbol[tf] = {"ok": True, "candles": [], "count": 0, "status": "NO_DATA",
+                                      "resolvedSymbol": resolved}
+                else:
+                    candle_list = _rates_to_candles(rates)
+                    per_symbol[tf] = {"ok": True, "candles": candle_list, "count": len(candle_list),
+                                      "resolvedSymbol": resolved}
+            data[symbol] = per_symbol
+    finally:
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+
+    return {"ok": True, "source": "mt5-python-bridge", "count": count,
+            "timestamp": datetime.now(timezone.utc).isoformat(), "data": data}
+
+
+# ---------------------------------------------------------------------------
+# Symbols — GET /symbols
+# ---------------------------------------------------------------------------
+
+@app.get("/symbols")
+def symbols_route(x_api_key: str | None = Header(default=None)):
+    _check_api_key(x_api_key, required=False)
+    from .services.metatrader_service import _load_mt5, _build_connection_kwargs
+
+    try:
+        mt5 = _load_mt5()
+    except Exception as exc:
+        return {"ok": False, "error": "MT5_NOT_INSTALLED", "message": str(exc), "symbols": []}
+
+    try:
+        if not mt5.initialize(**_build_connection_kwargs(5000)):
+            _, message = mt5.last_error()
+            return {"ok": False, "error": "MT5_NOT_CONNECTED", "message": str(message), "symbols": []}
+        all_symbols = mt5.symbols_get() or []
+        visible = [s.name for s in all_symbols if getattr(s, "visible", False)]
+        return {"ok": True, "count": len(visible), "symbols": visible,
+                "totalAvailable": len(all_symbols),
+                "timestamp": datetime.now(timezone.utc).isoformat()}
     finally:
         try:
             mt5.shutdown()

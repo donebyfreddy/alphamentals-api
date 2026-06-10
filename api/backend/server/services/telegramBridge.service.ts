@@ -176,30 +176,54 @@ type TelegramBridgeRuntimeState = {
 
 const TELEGRAM_BRIDGE_SCRIPT = path.join(process.cwd(), 'scripts', 'telegram_bridge.py');
 
+// PythonSpec: cmd = executable, cmdArgs = version args prepended before the script.
+// e.g. { cmd: 'py', cmdArgs: ['-3.11'], label: 'py -3.11' }
+type PythonSpec = { cmd: string; cmdArgs: string[]; label: string };
+
 // Resolution order:
-// 1. Explicit env override (TELEGRAM_PYTHON_BIN or PYTHON_EXECUTABLE)
-// 2. Project venv (Windows + Unix paths)
-// 3. Windows py launcher (py -3.11, py)
-// 4. Standard names (python3, python)
-function buildPythonCandidates(): string[] {
-  const explicit = [
+// 1. Explicit env override: TELEGRAM_PYTHON_PATH, TELEGRAM_PYTHON_BIN, PYTHON_EXECUTABLE
+// 2. Venv paths that EXIST on disk (checked with existsSync — no ENOENT)
+// 3. Windows py launcher: py -3.11, then py (correct 2-arg spawn)
+// 4. Standard names: python3, python
+function buildPythonCandidates(): PythonSpec[] {
+  // Use synchronous existsSync to filter venv paths that actually exist
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { existsSync } = require('node:fs') as typeof import('node:fs');
+
+  const explicit: PythonSpec[] = [
+    process.env.TELEGRAM_PYTHON_PATH?.trim(),
     process.env.TELEGRAM_PYTHON_BIN?.trim(),
     process.env.PYTHON_EXECUTABLE?.trim(),
-  ].filter(Boolean) as string[];
+  ]
+    .filter(Boolean)
+    .map((cmd) => ({ cmd: cmd!, cmdArgs: [], label: `env:${cmd}` }));
 
-  const venvCandidates = [
+  // Only include venv paths that actually exist — prevents ENOENT on missing venv
+  const venvPaths: PythonSpec[] = [
     path.join(process.cwd(), '.venv', 'Scripts', 'python.exe'),
     path.join(process.cwd(), '.venv', 'bin', 'python'),
     path.join(process.cwd(), 'mt5bridge', '.venv', 'Scripts', 'python.exe'),
     path.join(process.cwd(), 'mt5bridge', '.venv', 'bin', 'python'),
+  ]
+    .filter((p) => { try { return existsSync(p); } catch { return false; } })
+    .map((p) => ({ cmd: p, cmdArgs: [], label: `venv:${path.basename(p)}` }));
+
+  const standard: PythonSpec[] = [
+    // py -3.11: spawn('py', ['-3.11', script, ...args]) — Windows version-specific launcher
+    { cmd: 'py', cmdArgs: ['-3.11'], label: 'py -3.11' },
+    { cmd: 'py', cmdArgs: [], label: 'py' },
+    { cmd: 'python3', cmdArgs: [], label: 'python3' },
+    { cmd: 'python', cmdArgs: [], label: 'python' },
   ];
 
-  return [...explicit, ...venvCandidates, 'py', 'python3', 'python'];
+  const all = [...explicit, ...venvPaths, ...standard];
+  console.log('[Telegram] Python candidates:', all.map((s) => s.label).join(', '));
+  return all;
 }
 
-const PYTHON_CANDIDATES = buildPythonCandidates();
+const PYTHON_CANDIDATES: PythonSpec[] = buildPythonCandidates();
 
-let resolvedPythonExecutable: string | null = null;
+let resolvedPythonSpec: PythonSpec | null = null;
 let monitorProcess: ReturnType<typeof spawn> | null = null;
 let monitorRestartTimer: NodeJS.Timeout | null = null;
 let intentionalMonitorStop = false;
@@ -295,9 +319,10 @@ function toBridgeError(payload: BridgeErrorPayload | null, fallbackMessage: stri
   );
 }
 
-async function tryRunPythonCommand(command: string, args: string[], timeoutMs: number) {
-  return await new Promise<{ stdout: string; stderr: string; executable: string }>((resolve, reject) => {
-    const child = spawn(command, [TELEGRAM_BRIDGE_SCRIPT, ...args], {
+async function tryRunPythonCommand(spec: PythonSpec, args: string[], timeoutMs: number) {
+  return await new Promise<{ stdout: string; stderr: string; spec: PythonSpec }>((resolve, reject) => {
+    // Correctly prepend version args: spawn('py', ['-3.11', script, ...args])
+    const child = spawn(spec.cmd, [...spec.cmdArgs, TELEGRAM_BRIDGE_SCRIPT, ...args], {
       cwd: process.cwd(),
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -330,7 +355,7 @@ async function tryRunPythonCommand(command: string, args: string[], timeoutMs: n
     child.on('close', (code) => {
       clearTimeout(timeout);
       if (code === 0) {
-        resolve({ stdout, stderr, executable: command });
+        resolve({ stdout, stderr, spec });
         return;
       }
 
@@ -343,13 +368,14 @@ async function tryRunPythonCommand(command: string, args: string[], timeoutMs: n
 }
 
 async function runBridgeCommand<T>(args: string[], timeoutMs = 30_000): Promise<T> {
-  const executables = resolvedPythonExecutable ? [resolvedPythonExecutable] : PYTHON_CANDIDATES;
+  const specs = resolvedPythonSpec ? [resolvedPythonSpec] : PYTHON_CANDIDATES;
   let lastError: unknown = null;
 
-  for (const executable of executables) {
+  for (const spec of specs) {
     try {
-      const result = await tryRunPythonCommand(executable, args, timeoutMs);
-      resolvedPythonExecutable = result.executable;
+      const result = await tryRunPythonCommand(spec, args, timeoutMs);
+      resolvedPythonSpec = result.spec;
+      console.log(`[Telegram] using python: ${spec.label}`);
 
       const payload = parseJsonLine<T>(result.stdout.trim().split('\n').filter(Boolean).at(-1) ?? '');
       if (!payload) {
@@ -365,7 +391,7 @@ async function runBridgeCommand<T>(args: string[], timeoutMs = 30_000): Promise<
   }
 
   if (lastError instanceof Error) throw lastError;
-  throw new TelegramBridgeError('PYTHON_NOT_FOUND', 'Python was not found. Install Python 3 or set TELEGRAM_PYTHON_BIN.');
+  throw new TelegramBridgeError('PYTHON_NOT_FOUND', 'Python was not found. Install Python 3 or set TELEGRAM_PYTHON_PATH.');
 }
 
 function applyConnectionFailure(error: TelegramBridgeError | Error) {
@@ -445,7 +471,10 @@ function maskSession(value: string | null) {
 export async function logTelegramStartupDiagnostics() {
   updateBaseState();
   const config = getTelegramEnvConfig();
-  const preferredPython = process.env.TELEGRAM_PYTHON_BIN?.trim() || null;
+  const preferredPython = process.env.TELEGRAM_PYTHON_PATH?.trim()
+    || process.env.TELEGRAM_PYTHON_BIN?.trim()
+    || process.env.PYTHON_EXECUTABLE?.trim()
+    || null;
 
   console.log('[Telegram] Startup config', {
     enabled: config.enabled,
@@ -458,7 +487,8 @@ export async function logTelegramStartupDiagnostics() {
     sessionName: config.sessionName,
     targetChatConfigured: Boolean(config.targetChat),
     targetChat: config.targetChat,
-    pythonCandidates: PYTHON_CANDIDATES,
+    pythonCandidates: PYTHON_CANDIDATES.map((s) => s.label),
+    resolvedPython: resolvedPythonSpec?.label ?? null,
     preferredPython,
     workingDirectory: process.cwd(),
     renderService: process.env.RENDER_SERVICE_NAME ?? null,
@@ -631,8 +661,8 @@ function handleMonitorEvent(event: MonitorEvent, onMessage: (message: TelegramBr
   }
 }
 
-function spawnMonitorProcess(executable: string, handlers: MonitorHandlers) {
-  const child = spawn(executable, [TELEGRAM_BRIDGE_SCRIPT, 'monitor'], {
+function spawnMonitorProcess(spec: PythonSpec, handlers: MonitorHandlers) {
+  const child = spawn(spec.cmd, [...spec.cmdArgs, TELEGRAM_BRIDGE_SCRIPT, 'monitor'], {
     cwd: process.cwd(),
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -668,7 +698,7 @@ function spawnMonitorProcess(executable: string, handlers: MonitorHandlers) {
       handlers.onEvent({
         event: 'error',
         code: 'PYTHON_NOT_FOUND',
-        message: `Python executable "${executable}" was not found.`,
+        message: `Python executable "${spec.label}" was not found.`,
         details: error.message,
       });
       handlers.onExit({ code: 127, signal: null });
@@ -881,12 +911,12 @@ export async function startTelegramMonitoring(onMessage: (message: TelegramBridg
 
   intentionalMonitorStop = false;
 
-  const executables = resolvedPythonExecutable ? [resolvedPythonExecutable] : PYTHON_CANDIDATES;
+  const specs = resolvedPythonSpec ? [resolvedPythonSpec] : PYTHON_CANDIDATES;
   let started = false;
 
-  for (const executable of executables) {
+  for (const spec of specs) {
     try {
-      monitorProcess = spawnMonitorProcess(executable, {
+      monitorProcess = spawnMonitorProcess(spec, {
         onEvent: (event) => handleMonitorEvent(event, onMessage),
         onExit: ({ code, signal }) => {
           monitorProcess = null;
@@ -899,7 +929,8 @@ export async function startTelegramMonitoring(onMessage: (message: TelegramBridg
           scheduleMonitorRestart(onMessage);
         },
       });
-      resolvedPythonExecutable = executable;
+      resolvedPythonSpec = spec;
+      console.log(`[Telegram] script=${TELEGRAM_BRIDGE_SCRIPT} python=${spec.label} target=${config.targetChat ?? 'not set'}`);
       started = true;
       break;
     } catch (error) {
@@ -909,9 +940,9 @@ export async function startTelegramMonitoring(onMessage: (message: TelegramBridg
   }
 
   if (!started) {
-    runtimeState.error = 'Python was not found. Install Python 3 or set TELEGRAM_PYTHON_BIN.';
+    runtimeState.error = 'Python was not found. Install Python 3 or set TELEGRAM_PYTHON_PATH.';
     runtimeState.code = 'PYTHON_NOT_FOUND';
-    console.error(`[Telegram] ${runtimeState.error}`);
+    console.error(`[Telegram] Python not found. Tried: ${PYTHON_CANDIDATES.map((s) => s.label).join(', ')}`);
   }
 }
 
@@ -948,16 +979,16 @@ export async function runTelegramDoctor(): Promise<{
     scriptExists = existsSync(scriptPath);
   } catch { /* ignore */ }
 
-  // Check python availability and version
+  // Check python availability and version — try each candidate until one works
   let pythonFound = false;
   let pythonVersion: string | null = null;
   let pythonExecutable: string | null = null;
-  for (const candidate of PYTHON_CANDIDATES) {
-    const result = spawnSync(candidate, ['--version'], { encoding: 'utf8', timeout: 5000 });
+  for (const spec of PYTHON_CANDIDATES) {
+    const result = spawnSync(spec.cmd, [...spec.cmdArgs, '--version'], { encoding: 'utf8', timeout: 5000 });
     if (result.error == null && result.status === 0) {
       pythonFound = true;
       pythonVersion = (result.stdout || result.stderr || '').trim().split('\n')[0] ?? null;
-      pythonExecutable = candidate;
+      pythonExecutable = spec.label;
       break;
     }
   }
@@ -981,9 +1012,13 @@ export async function runTelegramDoctor(): Promise<{
     };
   }
 
-  // Run doctor command via the resolved executable
+  // Run doctor command via the first working candidate
+  const docSpec = PYTHON_CANDIDATES.find((s) => {
+    const r = spawnSync(s.cmd, [...s.cmdArgs, '--version'], { encoding: 'utf8', timeout: 3000 });
+    return r.error == null && r.status === 0;
+  }) ?? { cmd: 'python3', cmdArgs: [], label: 'python3' };
   try {
-    const result = await tryRunPythonCommand(pythonExecutable ?? 'python3', ['doctor', '--json'], 15_000);
+    const result = await tryRunPythonCommand(docSpec, ['doctor', '--json'], 15_000);
     const doctor = parseJsonLine<DoctorCommandSuccess>(result.stdout.trim().split('\n').reverse().find(Boolean) ?? '');
     return {
       python_found: true,

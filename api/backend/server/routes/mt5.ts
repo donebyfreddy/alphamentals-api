@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { getRecentTrades, syncMt5AccountNow } from '../services/mt5Sync.service.js';
 import { getLatestHeartbeat, isEaConnected } from '../../../src/server/eaStore.js';
+import { getMt5BridgeStatus } from '../services/mt5Candles.service.js';
 
 export const mt5Router = Router();
 export const tradesRouter = Router();
@@ -30,33 +31,43 @@ mt5Router.post('/sync', async (_req, res) => {
   }
 });
 
-mt5Router.get('/status', (_req, res) => {
+mt5Router.get('/status', async (_req, res) => {
   const hb = getLatestHeartbeat();
-  const connected = isEaConnected(30_000);
+  const eaConnected = isEaConnected(30_000);
 
-  if (!hb) {
-    res.json({
-      ok: true,
-      data: {
-        connected: false,
-        status: 'no_heartbeat',
-        source: 'mt5-ea',
-        message: 'No EA heartbeat received. Ensure MetaTrader 5 is open and the EA is running.',
-      },
-    });
-    return;
-  }
+  // Python bridge status (candle source) — independent of the EA tick feed.
+  const bridge = await getMt5BridgeStatus().catch(() => null);
 
   res.json({
     ok: true,
-    data: {
-      connected,
-      status: connected ? 'connected' : 'stale',
+    mt5: {
+      bridgeUrl: bridge?.bridgeUrl ?? process.env.MT5_BRIDGE_URL ?? 'http://127.0.0.1:8001',
+      bridgeReachable: bridge?.bridgeReachable ?? false,
+      terminalConnected: bridge?.terminalConnected ?? false,
+      accountLogin: bridge?.accountLogin ?? (hb?.account ? String(hb.accountId) : null),
+      server: bridge?.server ?? null,
+      lastCheckAt: bridge?.lastCheckAt ?? new Date().toISOString(),
+      error: bridge?.error ?? null,
+    },
+    ea: {
+      connected: eaConnected,
+      status: hb ? (eaConnected ? 'connected' : 'stale') : 'no_heartbeat',
       source: 'mt5-ea',
-      account: hb.account,
-      accountId: hb.accountId,
-      lastHeartbeat: hb.receivedAt,
-      message: connected ? 'EA connected' : 'EA heartbeat stale (>30s)',
+      account: hb?.account ?? null,
+      accountId: hb?.accountId ?? null,
+      lastHeartbeat: hb?.receivedAt ?? null,
+      message: hb
+        ? (eaConnected ? 'EA connected' : 'EA heartbeat stale (>30s)')
+        : 'No EA heartbeat received. Ensure MetaTrader 5 is open and the EA is running.',
+    },
+    // Legacy shape kept for existing consumers.
+    data: {
+      connected: eaConnected,
+      status: hb ? (eaConnected ? 'connected' : 'stale') : 'no_heartbeat',
+      source: 'mt5-ea',
+      account: hb?.account ?? null,
+      accountId: hb?.accountId ?? null,
+      lastHeartbeat: hb?.receivedAt ?? null,
     },
   });
 });

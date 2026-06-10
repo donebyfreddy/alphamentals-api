@@ -3,6 +3,22 @@ import { getTradingViewCandlesForReplay } from '../lib/market/tradingViewCandles
 import { mapToTradingViewTimeframe } from '../lib/market/symbolMapping.js';
 import { getBridgeConfigDiagnostics, getPreferredMarketPrices } from '../../../src/server/mt5BridgeQuotes.js';
 import { normalizeApiSymbol, normalizeDisplaySymbol } from '../../../src/services/pairs/symbolNormalizer.js';
+import {
+  getMt5Candles,
+  getMt5CandleBundle,
+  getMt5BridgeStatus,
+  REQUIRED_CANDLES,
+  ALL_TIMEFRAMES,
+  type Mt5Timeframe,
+} from '../services/mt5Candles.service.js';
+
+const MT5_TF_SET: Mt5Timeframe[] = ['W1', 'D1', 'H4', 'H1', 'M15', 'M5'];
+
+/** Map any incoming timeframe form to a supported MT5 timeframe (or null). */
+function toMt5Timeframe(tf: string): Mt5Timeframe | null {
+  const norm = normalizeTimeframe(tf).toUpperCase();
+  return MT5_TF_SET.includes(norm as Mt5Timeframe) ? (norm as Mt5Timeframe) : null;
+}
 
 export const marketDataRouter = Router();
 
@@ -150,21 +166,103 @@ marketDataRouter.get('/candles', async (req, res) => {
 
     console.log('[market-data] candles_request', { symbol, timeframe, limit });
 
-    // MT5 bridge candle feed is not yet connected — return empty candles with clear status.
+    const mt5Tf = toMt5Timeframe(rawTimeframe);
+    if (!mt5Tf) {
+      return res.status(400).json({
+        ok: false, error: 'INVALID_TIMEFRAME', symbol, timeframe,
+        message: `Timeframe '${rawTimeframe}' is not supported. Use one of ${MT5_TF_SET.join(', ')}.`,
+      });
+    }
+
+    const count = req.query.count ? Math.min(Number(req.query.count), 5000) : limit;
+    const result = await getMt5Candles(symbol, mt5Tf, { count, forceRefresh: req.query.refresh === 'true' });
+
+    if (result.status === 'error') {
+      return res.status(502).json({
+        ok: false, error: result.error ?? 'MT5_CANDLES_FAILED', symbol,
+        displaySymbol: normalizeDisplaySymbol(symbol), timeframe: mt5Tf,
+        source: 'mt5-python-bridge', message: result.message, candles: [],
+      });
+    }
+    if (result.status === 'insufficient_data') {
+      return res.json({
+        ok: false, error: 'INSUFFICIENT_CANDLE_DATA', symbol,
+        displaySymbol: normalizeDisplaySymbol(symbol), timeframe: mt5Tf,
+        source: 'mt5-python-bridge', message: result.message,
+        details: { symbol, timeframe: mt5Tf, available: result.available, required: result.required, source: 'mt5-python-bridge' },
+        candles: result.candles,
+      });
+    }
     return res.json({
-      ok: true,
-      symbol,
-      displaySymbol: normalizeDisplaySymbol(symbol),
-      timeframe,
-      limit,
-      candles: [] as unknown[],
-      provider: 'mt5-bridge',
-      status: 'MT5_BRIDGE_CANDLES_NOT_CONNECTED',
-      message: `Candle feed not connected for ${symbol} ${timeframe}. Configure MT5_BRIDGE_URL and ensure the EA is streaming candles.`,
+      ok: true, symbol, displaySymbol: normalizeDisplaySymbol(symbol),
+      timeframe: mt5Tf, source: 'mt5-python-bridge', count: result.available, candles: result.candles,
     });
   } catch (err) {
     console.error('[market-data] candles_error', err instanceof Error ? err.message : err);
     res.status(502).json(providerFailureBody(err, (req.query.symbol as string) ?? null));
+  }
+});
+
+// ── GET /candles/bulk?symbols=...&timeframes=W1,D1,...&count=300 ───────────────
+marketDataRouter.get('/candles/bulk', async (req, res) => {
+  try {
+    const symbols = String(req.query.symbols ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    const tfRaw = String(req.query.timeframes ?? 'W1,D1,H4,H1,M15,M5').split(',').map((s) => s.trim()).filter(Boolean);
+    const count = req.query.count ? Math.min(Number(req.query.count), 5000) : 300;
+
+    if (!symbols.length) return res.status(400).json({ ok: false, error: 'symbols param required' });
+
+    const timeframes = tfRaw.map(toMt5Timeframe).filter((t): t is Mt5Timeframe => t !== null);
+    if (!timeframes.length) return res.status(400).json({ ok: false, error: 'INVALID_TIMEFRAME', message: `Use timeframes from ${MT5_TF_SET.join(', ')}` });
+
+    const data: Record<string, unknown> = {};
+    for (const sym of symbols) {
+      const normalized = normalizeSymbol(sym);
+      const bundle = await getMt5CandleBundle(normalized, { timeframes, count, forceRefresh: req.query.refresh === 'true' });
+      data[normalized] = bundle.timeframes;
+    }
+    return res.json({ ok: true, source: 'mt5-python-bridge', count, data, updatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('[market-data] candles_bulk_error', err instanceof Error ? err.message : err);
+    res.status(502).json({ ok: false, error: 'CANDLES_BULK_ERROR', message: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
+// ── GET /candles/diagnostics ──────────────────────────────────────────────────
+marketDataRouter.get('/candles/diagnostics', async (req, res) => {
+  try {
+    const symbols = String(req.query.symbols ?? 'XAUUSD,EURUSD,GBPUSD,DXY,USOIL')
+      .split(',').map((s) => s.trim()).filter(Boolean);
+    const bridge = await getMt5BridgeStatus();
+
+    const candles: Record<string, Record<string, { available: number; required: number; ok: boolean }>> = {};
+    for (const sym of symbols) {
+      const normalized = normalizeSymbol(sym);
+      const bundle = await getMt5CandleBundle(normalized);
+      const perTf: Record<string, { available: number; required: number; ok: boolean }> = {};
+      for (const tf of ALL_TIMEFRAMES) {
+        const r = bundle.timeframes[tf];
+        perTf[tf] = { available: r?.available ?? 0, required: REQUIRED_CANDLES[tf], ok: (r?.status ?? 'error') === 'ok' };
+      }
+      candles[normalized] = perTf;
+    }
+
+    res.json({
+      ok: true,
+      mt5: {
+        bridgeUrl: bridge.bridgeUrl,
+        bridgeReachable: bridge.bridgeReachable,
+        terminalConnected: bridge.terminalConnected,
+        accountLogin: bridge.accountLogin,
+        server: bridge.server,
+        lastCheckAt: bridge.lastCheckAt,
+        error: bridge.error,
+      },
+      candles,
+      hint: 'If candle counts are low, open the symbol charts in MT5 on the VPS so the terminal downloads history.',
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: 'CANDLES_DIAGNOSTICS_ERROR', message: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
 

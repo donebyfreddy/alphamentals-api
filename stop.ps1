@@ -1,7 +1,7 @@
 # Stop and optionally delete PM2 processes.
 # Usage:
-#   .\stop.ps1           — stop alphamentals-api (can be restarted)
-#   .\stop.ps1 -Delete   — delete alphamentals-api from PM2 and clean up mt5-bridge if present
+#   .\stop.ps1           -- stop both services (can be restarted with .\start.ps1)
+#   .\stop.ps1 -Delete   -- delete both services from PM2
 
 param([switch]$Delete)
 
@@ -11,17 +11,34 @@ $ErrorActionPreference = "Continue"
 Write-Host "=== Alphamentals STOP ===" -ForegroundColor Cyan
 Write-Host ""
 
-# Always remove stale mt5-bridge from PM2 if it was left over from a previous setup
-try { pm2 delete mt5-bridge 2>$null } catch {}
-
 if ($Delete) {
-    Write-Host "Deleting alphamentals-api from PM2..." -ForegroundColor Yellow
-    pm2 delete alphamentals-api 2>$null
+    Write-Host "Deleting PM2 apps..." -ForegroundColor Yellow
+
+    try {
+        pm2 delete alphamentals-api 2>$null
+    }
+    catch {}
+
+    try {
+        pm2 delete mt5-bridge 2>$null
+    }
+    catch {}
+
     Write-Host "  Done. Run .\start.ps1 to start again." -ForegroundColor Green
 }
 else {
-    Write-Host "Stopping alphamentals-api..." -ForegroundColor Yellow
-    pm2 stop alphamentals-api 2>$null
+    Write-Host "Stopping PM2 apps..." -ForegroundColor Yellow
+
+    try {
+        pm2 stop alphamentals-api 2>$null
+    }
+    catch {}
+
+    try {
+        pm2 stop mt5-bridge 2>$null
+    }
+    catch {}
+
     Write-Host "  Stopped. Run .\start.ps1 to restart." -ForegroundColor Green
 }
 

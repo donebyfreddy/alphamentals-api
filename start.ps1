@@ -1,4 +1,4 @@
-# Build the Node API and start the alphamentals-api PM2 process.
+# Build the Node API and start/restart both PM2 processes.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 Write-Host "=== Alphamentals START ===" -ForegroundColor Cyan
 Write-Host ""
 
-# [1/3] Build
+# [1/3] Build Node API
 Write-Host "[1/3] Building Node.js API..." -ForegroundColor Yellow
 
 npm run build:api
@@ -18,14 +18,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "  Build OK." -ForegroundColor Green
 
-# [2/3] PM2 - clean up any stale processes then start fresh
-Write-Host "[2/3] Starting PM2..." -ForegroundColor Yellow
-
-# Remove old mt5-bridge from PM2 if it was left over from a previous setup
-try {
-    pm2 delete mt5-bridge 2>$null
-}
-catch {}
+# [2/3] PM2 - stop, delete, then start both services fresh
+Write-Host "[2/3] Starting PM2 apps..." -ForegroundColor Yellow
 
 try {
     pm2 stop alphamentals-api 2>$null
@@ -33,7 +27,17 @@ try {
 catch {}
 
 try {
+    pm2 stop mt5-bridge 2>$null
+}
+catch {}
+
+try {
     pm2 delete alphamentals-api 2>$null
+}
+catch {}
+
+try {
+    pm2 delete mt5-bridge 2>$null
 }
 catch {}
 
@@ -46,7 +50,7 @@ if ($LASTEXITCODE -ne 0) {
 
 pm2 save --force
 
-Write-Host "  alphamentals-api started." -ForegroundColor Green
+Write-Host "  PM2 apps started." -ForegroundColor Green
 
 # Health check helper
 function Invoke-HealthCheck {
@@ -71,14 +75,19 @@ function Invoke-HealthCheck {
 }
 
 # [3/3] Health checks
-Write-Host "[3/3] Waiting for API to start..." -ForegroundColor Yellow
-Start-Sleep -Seconds 5
+Write-Host "[3/3] Waiting for services to start..." -ForegroundColor Yellow
+Start-Sleep -Seconds 8
 
-$apiOk = Invoke-HealthCheck "Health    http://localhost:3001/health" "http://localhost:3001/health"
+$apiOk    = Invoke-HealthCheck "Node API    http://localhost:3001/health"       "http://localhost:3001/health"
+$bridgeOk = Invoke-HealthCheck "MT5 Bridge  http://127.0.0.1:8001/health"      "http://127.0.0.1:8001/health"
+
+if ($bridgeOk) {
+    Invoke-HealthCheck "MT5 Status  http://127.0.0.1:8001/status" "http://127.0.0.1:8001/status" | Out-Null
+}
 
 if ($apiOk) {
-    Invoke-HealthCheck "EA status  http://localhost:3001/ea/status" "http://localhost:3001/ea/status" | Out-Null
-    Invoke-HealthCheck "Quotes     http://localhost:3001/api/market-data/quotes?symbols=XAUUSD" "http://localhost:3001/api/market-data/quotes?symbols=XAUUSD" | Out-Null
+    Invoke-HealthCheck "EA Status   http://localhost:3001/ea/status"                              "http://localhost:3001/ea/status" | Out-Null
+    Invoke-HealthCheck "Quotes      http://localhost:3001/api/market-data/quotes?symbols=XAUUSD"  "http://localhost:3001/api/market-data/quotes?symbols=XAUUSD" | Out-Null
 }
 
 Write-Host ""
@@ -86,11 +95,21 @@ pm2 list
 
 Write-Host ""
 
-if ($apiOk) {
-    Write-Host "=== alphamentals-api online ===" -ForegroundColor Green
-    Write-Host "  Open MetaTrader 5, attach TradeBridgeEA to a chart, and enable Algo Trading." -ForegroundColor Cyan
+if (-not $apiOk) {
+    Write-Host "  WARNING: Node API did not respond." -ForegroundColor Red
+    Write-Host "           Check logs: pm2 logs alphamentals-api" -ForegroundColor Red
+}
+
+if (-not $bridgeOk) {
+    Write-Host "  WARNING: MT5 Bridge did not respond." -ForegroundColor Yellow
+    Write-Host "           Ensure MetaTrader 5 is open and logged in." -ForegroundColor Yellow
+    Write-Host "           Check logs: pm2 logs mt5-bridge" -ForegroundColor Yellow
+    Write-Host "           Verify venv: dir mt5bridge\.venv\Scripts\python.exe" -ForegroundColor Yellow
+}
+
+if ($apiOk -and $bridgeOk) {
+    Write-Host "=== All services healthy ===" -ForegroundColor Green
 }
 else {
-    Write-Host "  WARNING: Node API did not respond. Check logs: pm2 logs alphamentals-api" -ForegroundColor Red
     Write-Host "=== Startup completed with warnings ===" -ForegroundColor Yellow
 }

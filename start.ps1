@@ -85,9 +85,46 @@ if ($bridgeOk) {
     Invoke-HealthCheck "MT5 Status  http://127.0.0.1:8001/status" "http://127.0.0.1:8001/status" | Out-Null
 }
 
+$eaTicksOk   = $false
+$quotePriceOk = $false
+
 if ($apiOk) {
-    Invoke-HealthCheck "EA Status   http://localhost:3001/ea/status"                              "http://localhost:3001/ea/status" | Out-Null
-    Invoke-HealthCheck "Quotes      http://localhost:3001/api/market-data/quotes?symbols=XAUUSD"  "http://localhost:3001/api/market-data/quotes?symbols=XAUUSD" | Out-Null
+    Invoke-HealthCheck "EA Status   http://localhost:3001/ea/status"  "http://localhost:3001/ea/status" | Out-Null
+
+    # Check /ea/ticks - tells us whether the MT5 EA has sent any live prices.
+    try {
+        $tickResp = Invoke-WebRequest -Uri "http://localhost:3001/ea/ticks" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
+        $tickJson = $tickResp.Content | ConvertFrom-Json
+        $tickCount = $tickJson.tickCount
+        if ($tickCount -gt 0) {
+            Write-Host "  [OK]   EA Ticks    http://localhost:3001/ea/ticks ($tickCount symbol(s) received)" -ForegroundColor Green
+            $eaTicksOk = $true
+        }
+        else {
+            Write-Host "  [WARN] EA Ticks    http://localhost:3001/ea/ticks - no ticks yet (EA not connected?)" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "  [FAIL] EA Ticks    http://localhost:3001/ea/ticks - $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    # Check quotes endpoint and warn if price is null.
+    try {
+        $qResp = Invoke-WebRequest -Uri "http://localhost:3001/api/market-data/quotes?symbols=XAUUSD" -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop
+        $qJson = $qResp.Content | ConvertFrom-Json
+        $xauPrice = $qJson.data.XAUUSD.price
+        if ($null -ne $xauPrice) {
+            Write-Host "  [OK]   Quotes      http://localhost:3001/api/market-data/quotes?symbols=XAUUSD (XAUUSD=$xauPrice)" -ForegroundColor Green
+            $quotePriceOk = $true
+        }
+        else {
+            Write-Host "  [WARN] Quotes      XAUUSD price is null - API is online but no EA tick received yet." -ForegroundColor Yellow
+            Write-Host "         Check MT5 Expert Advisors log and run: Invoke-WebRequest http://localhost:3001/ea/ticks" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "  [FAIL] Quotes      http://localhost:3001/api/market-data/quotes?symbols=XAUUSD - $($_.Exception.Message)" -ForegroundColor Red
+    }
 }
 
 Write-Host ""
@@ -107,8 +144,17 @@ if (-not $bridgeOk) {
     Write-Host "           Verify venv: dir mt5bridge\.venv\Scripts\python.exe" -ForegroundColor Yellow
 }
 
-if ($apiOk -and $bridgeOk) {
-    Write-Host "=== All services healthy ===" -ForegroundColor Green
+if ($apiOk -and -not $eaTicksOk) {
+    Write-Host "  NOTE:    No EA ticks yet. Once MT5 EA is running you can verify with:" -ForegroundColor Cyan
+    Write-Host "             Invoke-WebRequest http://localhost:3001/ea/ticks | ConvertFrom-Json" -ForegroundColor Cyan
+    Write-Host "           Make sure http://127.0.0.1:3001 is allowed in MT5 Options -> Expert Advisors." -ForegroundColor Cyan
+}
+
+if ($apiOk -and $bridgeOk -and $eaTicksOk -and $quotePriceOk) {
+    Write-Host "=== All services healthy and receiving live prices ===" -ForegroundColor Green
+}
+elseif ($apiOk -and $bridgeOk) {
+    Write-Host "=== Services started - waiting for MT5 EA to connect ===" -ForegroundColor Yellow
 }
 else {
     Write-Host "=== Startup completed with warnings ===" -ForegroundColor Yellow

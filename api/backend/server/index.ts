@@ -173,6 +173,19 @@ app.use('/api', (req: express.Request, res: express.Response) => {
   });
 });
 
+// Global error handler — catches malformed JSON bodies (e.g. MQL5 null-byte bug)
+// and any other unhandled route errors.
+app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const error = err as { type?: string; message?: string; status?: number };
+  if (error.type === 'entity.parse.failed') {
+    console.error(`[json-parse-error] ${req.method} ${req.path} content-type=${req.headers['content-type'] ?? ''} err=${error.message ?? ''}`);
+    res.status(400).json({ ok: false, error: 'Invalid JSON body', detail: error.message });
+    return;
+  }
+  console.error(`[server-error] ${req.method} ${req.path}`, err);
+  res.status(error.status ?? 500).json({ ok: false, error: 'Internal server error' });
+});
+
 function configuredPortCandidates() {
   const explicit = [process.env.PORT, process.env.API_PORT, process.env.SERVER_PORT]
     .map(Number)

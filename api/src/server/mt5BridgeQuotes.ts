@@ -53,9 +53,11 @@ export function getPreferredMarketPrices(symbols: string[]): Promise<QuotesRespo
   for (const sym of symbols) {
     const tick = getLatestTick(sym);
     if (tick?.price == null) {
+      console.log(`[market-data] missing EA tick ${sym}`);
       data[sym] = emptyEntry(sym, timestamp);
       errors[sym] = 'Waiting for EA tick';
     } else {
+      console.log(`[market-data] using EA tick ${sym} bid=${tick.bid} ask=${tick.ask} price=${tick.price}`);
       data[sym] = {
         symbol: sym,
         displaySymbol: DISPLAY_NAMES[sym] ?? sym,

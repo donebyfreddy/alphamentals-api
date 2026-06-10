@@ -1,4 +1,4 @@
-# Build the Node API and start/restart both PM2 processes.
+# Build the Node API and start/restart the PM2 process.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -7,7 +7,7 @@ Write-Host "=== Alphamentals START ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Build Node API
-Write-Host "[1/4] Building Node.js API..." -ForegroundColor Yellow
+Write-Host "[1/3] Building Node.js API..." -ForegroundColor Yellow
 
 npm run build:api
 
@@ -18,8 +18,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "  Build OK." -ForegroundColor Green
 
-# Start / restart PM2 apps
-Write-Host "[2/4] Starting PM2 apps..." -ForegroundColor Yellow
+# Start / restart PM2 app
+Write-Host "[2/3] Starting PM2..." -ForegroundColor Yellow
 
 try {
     pm2 stop alphamentals-api 2>$null
@@ -27,17 +27,7 @@ try {
 catch {}
 
 try {
-    pm2 stop mt5-bridge 2>$null
-}
-catch {}
-
-try {
     pm2 delete alphamentals-api 2>$null
-}
-catch {}
-
-try {
-    pm2 delete mt5-bridge 2>$null
 }
 catch {}
 
@@ -50,7 +40,7 @@ if ($LASTEXITCODE -ne 0) {
 
 pm2 save --force
 
-Write-Host "  PM2 apps started." -ForegroundColor Green
+Write-Host "  PM2 started." -ForegroundColor Green
 
 # Health check helper
 function Invoke-HealthCheck {
@@ -78,21 +68,13 @@ function Invoke-HealthCheck {
 }
 
 # Health checks
-Write-Host "[3/4] Waiting for services to start..." -ForegroundColor Yellow
+Write-Host "[3/3] Waiting for service to start..." -ForegroundColor Yellow
 Start-Sleep -Seconds 5
 
-Write-Host "[4/4] Health checks..." -ForegroundColor Yellow
-
 $apiOk = Invoke-HealthCheck "Node API" "http://localhost:3001/health"
-$bridgeOk = Invoke-HealthCheck "MT5 Bridge" "http://127.0.0.1:8001/health"
 
-if ($bridgeOk) {
-    Invoke-HealthCheck "MT5 Status" "http://127.0.0.1:8001/status" | Out-Null
-}
-
-if ($apiOk -and $bridgeOk) {
-    Write-Host ""
-    Write-Host "  Testing quotes via API..." -ForegroundColor Yellow
+if ($apiOk) {
+    Invoke-HealthCheck "EA Status" "http://localhost:3001/ea/status" | Out-Null
     Invoke-HealthCheck "Quotes XAUUSD" "http://localhost:3001/api/market-data/quotes?symbols=XAUUSD" | Out-Null
 }
 
@@ -103,17 +85,9 @@ Write-Host ""
 
 if (-not $apiOk) {
     Write-Host "  WARNING: Node API did not respond. Check logs: pm2 logs alphamentals-api" -ForegroundColor Red
-}
-
-if (-not $bridgeOk) {
-    Write-Host "  WARNING: MT5 Bridge did not respond. Make sure MetaTrader 5 is open." -ForegroundColor Yellow
-    Write-Host "           Check logs: pm2 logs mt5-bridge" -ForegroundColor Yellow
-    Write-Host "           Check Python venv: dir mt5bridge\.venv\Scripts\python.exe" -ForegroundColor Yellow
-}
-
-if ($apiOk -and $bridgeOk) {
-    Write-Host "=== All services healthy ===" -ForegroundColor Green
+    Write-Host "=== Startup completed with warnings ===" -ForegroundColor Yellow
 }
 else {
-    Write-Host "=== Startup completed with warnings ===" -ForegroundColor Yellow
+    Write-Host "  NOTE: Open MetaTrader 5 and attach the EA to a chart to start receiving data." -ForegroundColor Cyan
+    Write-Host "=== alphamentals-api online ===" -ForegroundColor Green
 }

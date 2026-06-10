@@ -1,17 +1,30 @@
 # Alphamentals API
 
 Full backend API server for the Alphamentals trading dashboard.
-Runs on a Windows VPS with PM2, serving all dashboard routes and proxying data from the MT5 bridge.
+Runs on a Windows VPS with PM2, receiving live data directly from the MetaTrader 5 EA.
 
 ```
+MetaTrader 5 EA (TradeBridgeEA.mq5)
+  -> POST http://127.0.0.1:3001/ea/heartbeat
+  -> POST http://127.0.0.1:3001/ea/tick
+Node API on port 3001  ← this repo
+  -> public API endpoints return latest MT5 data
 Frontend dashboard (Cloudflare Pages / Vercel)
-  ↓  NEXT_PUBLIC_API_BASE_URL=http://217.71.203.77:3001
-Windows VPS Backend API  ← this repo
-  ↓  MT5_BRIDGE_URL=http://127.0.0.1:8001
-Python MT5 Bridge (port 8001)
-  ↓
-MetaTrader 5
+  <- NEXT_PUBLIC_API_BASE_URL=http://217.71.203.77:3001
 ```
+
+## MetaTrader 5 requirements
+
+- MetaTrader 5 must be open on the VPS.
+- `TradeBridgeEA.mq5` must be compiled and attached to a chart.
+- **Algo Trading** must be enabled (green button in the MT5 toolbar).
+- In MT5: `Tools → Options → Expert Advisors → Allow WebRequest for listed URL`:
+
+```
+http://127.0.0.1:3001
+```
+
+The EA posts heartbeats to `http://127.0.0.1:3001/ea/heartbeat` and tick data to `http://127.0.0.1:3001/ea/tick`.
 
 ## Windows VPS deployment
 
@@ -42,62 +55,40 @@ Minimum required values:
 NODE_ENV=production
 HOST=0.0.0.0
 PORT=3001
-MT5_BRIDGE_URL=http://127.0.0.1:8001
-MT5_BRIDGE_API_KEY=your-secret-key
 CORS_ORIGINS=https://alphamentals-dashboard.pages.dev,https://alphamentals-dashboard.vercel.app,http://localhost:3000
 ```
 
-### 4. Build
+### 4. Build and start
 
 ```powershell
-npm run build:api
+.\start.ps1
 ```
 
-Output is written to `dist-api/backend/server/index.js`.
+This builds the TypeScript API and starts `alphamentals-api` via PM2.
 
-### 5. Start with PM2
+### 5. Verify locally
 
 ```powershell
-npm run pm2:start
-pm2 save
-pm2 startup
+curl.exe http://localhost:3001/health
+curl.exe http://localhost:3001/ea/status
+curl.exe "http://localhost:3001/api/mt5/status"
+curl.exe "http://localhost:3001/api/market-data/quotes?symbols=XAUUSD,EURUSD"
 ```
 
-### 6. Verify locally
+### 6. Verify from external network
 
 ```powershell
-curl http://localhost:3001/health
-curl "http://localhost:3001/api/health"
-curl "http://localhost:3001/api/ping"
-curl "http://localhost:3001/api/mt5/status"
-curl "http://localhost:3001/api/market-data/quotes?symbols=XAUUSD,EURUSD,GBPUSD"
-curl "http://localhost:3001/api/market-data/candles?symbol=XAUUSD&timeframe=M15&limit=100"
+curl.exe http://217.71.203.77:3001/health
+curl.exe "http://217.71.203.77:3001/api/market-data/quotes?symbols=XAUUSD"
 ```
 
-### 7. Verify from external network
-
-```powershell
-curl http://217.71.203.77:3001/health
-curl "http://217.71.203.77:3001/api/market-data/quotes?symbols=XAUUSD"
-curl "http://217.71.203.77:3001/api/market-data/candles?symbol=XAUUSD&timeframe=M15&limit=100"
-```
-
-### 8. Windows Firewall — open port 3001
+### 7. Windows Firewall — open port 3001
 
 Run in an elevated PowerShell:
 
 ```powershell
 New-NetFirewallRule -DisplayName "Alphamentals API" -Direction Inbound -Protocol TCP -LocalPort 3001 -Action Allow
 ```
-
-Or via the Windows Defender Firewall GUI:
-
-1. Open **Windows Defender Firewall with Advanced Security**
-2. **Inbound Rules → New Rule → Port**
-3. TCP, specific local port: `3001`
-4. Allow the connection
-5. Apply to Domain, Private, Public
-6. Name: `Alphamentals API`
 
 ## PM2 commands
 
@@ -117,6 +108,42 @@ npm run pm2:restart
 npm run pm2:logs
 ```
 
+## EA endpoints
+
+| Route | Method | Description |
+|---|---|---|
+| `/ea/heartbeat` | POST | Receives account snapshot from MT5 EA |
+| `/ea/tick` | POST | Receives latest symbol price from MT5 EA |
+| `/ea/status` | GET | EA connection status (based on last heartbeat age) |
+
+### Heartbeat payload
+
+```json
+{
+  "accountId": "10011220978-MetaQuotes-Demo",
+  "account": {
+    "login": "10011220978",
+    "server": "MetaQuotes-Demo",
+    "broker": "MetaQuotes Ltd.",
+    "name": "Federico Mencuccini",
+    "balance": 10000,
+    "equity": 10000
+  }
+}
+```
+
+### Tick payload
+
+```json
+{
+  "symbol": "XAUUSD",
+  "bid": 2310.12,
+  "ask": 2310.45,
+  "price": 2310.285,
+  "timestamp": "2026-06-10T08:48:22Z"
+}
+```
+
 ## API routes
 
 | Route | Description |
@@ -124,8 +151,9 @@ npm run pm2:logs
 | `GET /health` | Health check (public) |
 | `GET /api/health` | Health check with service info |
 | `GET /api/ping` | Liveness probe |
-| `GET /api/mt5/status` | MT5 bridge connection status |
-| `GET /api/market-data/quotes?symbols=XAUUSD,EURUSD` | Live quotes |
+| `GET /api/mt5/status` | EA connection status |
+| `GET /ea/status` | EA connection status (direct) |
+| `GET /api/market-data/quotes?symbols=XAUUSD,EURUSD` | Live quotes from EA tick store |
 | `GET /api/market-data/candles?symbol=XAUUSD&timeframe=M15&limit=200` | Candles |
 | `GET /api/trades/recent` | Recent trades |
 | `GET /api/journal/...` | Trade journal |
@@ -135,15 +163,11 @@ npm run pm2:logs
 
 ### Symbol formats accepted
 
-Both slash and no-slash formats are normalized automatically:
-
 | Input | Normalized |
 |---|---|
 | `XAU/USD` | `XAUUSD` |
 | `XAUUSD` | `XAUUSD` |
 | `EUR/USD` | `EURUSD` |
-| `EURUSD` | `EURUSD` |
-| `GBP/USD` | `GBPUSD` |
 | `WTI` | `USOIL` |
 | `DXY` | `DXY` |
 
@@ -166,23 +190,11 @@ NEXT_PUBLIC_API_BASE_URL=http://217.71.203.77:3001
 ```
 
 All `/api/*` requests from the dashboard go directly to this server.
-No Cloudflare Worker API is involved.
-No Vercel API routes handle trading data.
 
 ## Development
 
 ```powershell
 npm run dev:api      # run with tsx watch (hot-reload)
-npm run build:api    # compile TypeScript → dist-api/
+npm run build:api    # compile TypeScript -> dist-api/
 npm start            # run compiled output
-```
-
-## MT5 EA
-
-`mql5/TradeBridgeEA.mq5` sends heartbeats to the Python MT5 bridge on port 8001.
-
-In MT5: `Tools → Options → Expert Advisors → Allow WebRequest for listed URL`:
-
-```
-http://127.0.0.1:8001
 ```

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { getMt5Status, getRecentTrades, syncMt5AccountNow } from '../services/mt5Sync.service.js';
+import { getRecentTrades, syncMt5AccountNow } from '../services/mt5Sync.service.js';
+import { getLatestHeartbeat, isEaConnected } from '../../../src/server/eaStore.js';
 
 export const mt5Router = Router();
 export const tradesRouter = Router();
@@ -29,32 +30,35 @@ mt5Router.post('/sync', async (_req, res) => {
   }
 });
 
-const MT5_STATUS_FALLBACK = { ok: true as const, data: { connected: false, status: 'unavailable', message: 'MT5 bridge unavailable' } };
+mt5Router.get('/status', (_req, res) => {
+  const hb = getLatestHeartbeat();
+  const connected = isEaConnected(30_000);
 
-mt5Router.get('/status', async (_req, res) => {
-  try {
-    const raw = await getMt5Status();
-    let bridgeStatus: string;
-    if (!raw.apiReachable) bridgeStatus = 'unreachable';
-    else if (raw.linkedAccountExists) bridgeStatus = 'connected';
-    else bridgeStatus = 'no_account';
-
+  if (!hb) {
     res.json({
       ok: true,
       data: {
-        connected: raw.apiReachable && raw.linkedAccountExists,
-        status: bridgeStatus,
-        message: raw.lastError ?? (raw.apiReachable ? 'MT5 bridge reachable' : 'MT5 bridge unreachable'),
-        accountLogin: raw.accountLogin,
-        serverName: raw.serverName,
-        lastSyncTime: raw.lastSyncTime,
-        openTrades: raw.openTrades,
+        connected: false,
+        status: 'no_heartbeat',
+        source: 'mt5-ea',
+        message: 'No EA heartbeat received. Ensure MetaTrader 5 is open and the EA is running.',
       },
     });
-  } catch (error) {
-    console.error('[mt5/status]', formatMt5RouteError(error));
-    res.json(MT5_STATUS_FALLBACK);
+    return;
   }
+
+  res.json({
+    ok: true,
+    data: {
+      connected,
+      status: connected ? 'connected' : 'stale',
+      source: 'mt5-ea',
+      account: hb.account,
+      accountId: hb.accountId,
+      lastHeartbeat: hb.receivedAt,
+      message: connected ? 'EA connected' : 'EA heartbeat stale (>30s)',
+    },
+  });
 });
 
 tradesRouter.get('/recent', async (req, res) => {

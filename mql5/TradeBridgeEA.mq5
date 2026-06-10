@@ -5,6 +5,7 @@
 #property strict
 
 input string BridgeBaseUrl    = "http://127.0.0.1:3001";
+input string BridgeApiKey     = "285510e7bfe2158bcf2d73b05a24dc5110e5133a0d454a8ae4425e22d3b47865";   // must match EA_API_KEY in the Node API .env
 input string BridgeAccountId  = "";
 input int    HeartbeatSeconds = 10;
 input string WatchedSymbols   = "XAUUSD,EURUSD,GBPUSD,DXY,USOIL";
@@ -89,6 +90,8 @@ bool HttpPost(const string url, const string body, const string label, int timeo
    uchar data[], result[];
    string resHeaders;
    string headers = "Content-Type: application/json\r\nAccept: application/json\r\n";
+   if(StringLen(BridgeApiKey) > 0)
+      headers += "x-api-key: " + BridgeApiKey + "\r\n";
 
    StringToUTF8(body, data);
 

@@ -11,6 +11,18 @@ import {
 
 export const eaBridgeRouter = Router();
 
+// If EA_API_KEY is set in the environment, every /ea/* request must include
+// a matching x-api-key header.  Keeps the EA endpoints private even if the
+// VPS port 3001 is reachable from outside.
+eaBridgeRouter.use((req, res, next) => {
+  const required = process.env.EA_API_KEY ?? process.env.MT5_BRIDGE_API_KEY;
+  if (!required) { next(); return; }
+  const provided = req.headers['x-api-key'];
+  if (provided === required) { next(); return; }
+  console.warn(`[ea-bridge] unauthorized ${req.method} ${req.path} from ${req.ip}`);
+  res.status(401).json({ ok: false, error: 'Unauthorized' });
+});
+
 // Coerce a value to number; returns null if not numeric.
 function toNum(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;

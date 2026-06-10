@@ -175,7 +175,29 @@ type TelegramBridgeRuntimeState = {
 };
 
 const TELEGRAM_BRIDGE_SCRIPT = path.join(process.cwd(), 'scripts', 'telegram_bridge.py');
-const PYTHON_CANDIDATES = [process.env.TELEGRAM_PYTHON_BIN?.trim(), 'python3', 'python'].filter(Boolean) as string[];
+
+// Resolution order:
+// 1. Explicit env override (TELEGRAM_PYTHON_BIN or PYTHON_EXECUTABLE)
+// 2. Project venv (Windows + Unix paths)
+// 3. Windows py launcher (py -3.11, py)
+// 4. Standard names (python3, python)
+function buildPythonCandidates(): string[] {
+  const explicit = [
+    process.env.TELEGRAM_PYTHON_BIN?.trim(),
+    process.env.PYTHON_EXECUTABLE?.trim(),
+  ].filter(Boolean) as string[];
+
+  const venvCandidates = [
+    path.join(process.cwd(), '.venv', 'Scripts', 'python.exe'),
+    path.join(process.cwd(), '.venv', 'bin', 'python'),
+    path.join(process.cwd(), 'mt5bridge', '.venv', 'Scripts', 'python.exe'),
+    path.join(process.cwd(), 'mt5bridge', '.venv', 'bin', 'python'),
+  ];
+
+  return [...explicit, ...venvCandidates, 'py', 'python3', 'python'];
+}
+
+const PYTHON_CANDIDATES = buildPythonCandidates();
 
 let resolvedPythonExecutable: string | null = null;
 let monitorProcess: ReturnType<typeof spawn> | null = null;

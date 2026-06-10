@@ -68,9 +68,19 @@ const ALLOWED_ORIGIN_STRINGS: string[] = [
   process.env.FRONTEND_ORIGIN_ALT,
   'https://alphamentals-dashboard.pages.dev',
   'https://alphamentals-dashboard.vercel.app',
+  // Local dev — all common Next.js ports
   'http://localhost:3000',
-  'http://127.0.0.1:3000',
   'http://localhost:3001',
+  'http://localhost:3002',
+  'http://localhost:3003',
+  'http://localhost:3004',
+  'http://localhost:3005',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  'http://127.0.0.1:3002',
+  'http://127.0.0.1:3003',
+  'http://127.0.0.1:3004',
+  'http://127.0.0.1:3005',
 ].filter((v): v is string => typeof v === 'string' && v.length > 0);
 
 const VERCEL_PREVIEW_PATTERN = /^https:\/\/alphamentals-dashboard-[a-z0-9-]+-[a-z0-9]+\.vercel\.app$/;

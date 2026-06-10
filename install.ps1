@@ -1,5 +1,5 @@
 # Run once from the project root on the Windows VPS.
-# Requires: Run as Administrator, Node.js 20+, Python 3.11 available.
+# Requires: Run as Administrator, Node.js 20+.
 
 param(
     [switch]$SkipFirewall,
@@ -9,11 +9,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== Alphamentals - INSTALL ===" -ForegroundColor Cyan
+Write-Host "=== Alphamentals — INSTALL ===" -ForegroundColor Cyan
 Write-Host ""
 
-# [1/7] Node.js
-Write-Host "[1/7] Checking Node.js..." -ForegroundColor Yellow
+# [1/5] Node.js
+Write-Host "[1/5] Checking Node.js..." -ForegroundColor Yellow
 
 try {
     $nodeVersion = node --version 2>&1
@@ -25,103 +25,8 @@ catch {
     exit 1
 }
 
-# [2/7] Python 3.11
-Write-Host "[2/7] Checking Python 3.11..." -ForegroundColor Yellow
-
-$py311 = $null
-
-# Prefer py launcher with explicit 3.11
-try {
-    $ver = py -3.11 --version 2>&1
-    if ($ver -match "Python 3\.11") {
-        $py311 = "py -3.11"
-        Write-Host "  Found: $ver via py -3.11" -ForegroundColor Green
-    }
-}
-catch {}
-
-# Fallback candidates
-if (-not $py311) {
-    foreach ($candidate in @("python3.11", "python")) {
-        try {
-            $ver = & $candidate --version 2>&1
-
-            if ($ver -match "Python 3\.11") {
-                $py311 = $candidate
-                Write-Host "  Found: $ver via $candidate" -ForegroundColor Green
-                break
-            }
-        }
-        catch {}
-    }
-}
-
-if (-not $py311) {
-    Write-Host "  WARNING: Python 3.11 not found in PATH." -ForegroundColor Red
-    Write-Host "           MetaTrader5 package requires Python 3.11." -ForegroundColor Red
-    Write-Host "           Install it with:" -ForegroundColor Red
-    Write-Host "             winget install -e --id Python.Python.3.11" -ForegroundColor Red
-    Write-Host ""
-
-    foreach ($candidate in @("py", "python", "python3")) {
-        try {
-            $ver = & $candidate --version 2>&1
-
-            if ($ver -match "Python 3\.(1[2-9]|[2-9]\d)") {
-                Write-Host "  DETECTED: $ver - MetaTrader5 does not reliably support Python 3.12+." -ForegroundColor Red
-            }
-        }
-        catch {}
-    }
-
-    Write-Host "  Continuing install without Python venv - MT5 bridge will not work until Python 3.11 is installed." -ForegroundColor Yellow
-}
-else {
-    Write-Host "[2/7] Creating Python 3.11 venv at mt5bridge\.venv..." -ForegroundColor Yellow
-
-    if (Test-Path "mt5bridge\.venv") {
-        Write-Host "  venv already exists, skipping creation." -ForegroundColor Green
-    }
-    else {
-        if ($py311 -eq "py -3.11") {
-            py -3.11 -m venv mt5bridge\.venv
-        }
-        else {
-            & $py311 -m venv mt5bridge\.venv
-        }
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "  ERROR: Failed to create venv." -ForegroundColor Red
-            exit 1
-        }
-
-        Write-Host "  venv created." -ForegroundColor Green
-    }
-
-    Write-Host "[2/7] Installing Python requirements..." -ForegroundColor Yellow
-
-    if (-not (Test-Path "mt5bridge\requirements.txt")) {
-        Write-Host "  ERROR: mt5bridge\requirements.txt not found." -ForegroundColor Red
-        exit 1
-    }
-
-    & "mt5bridge\.venv\Scripts\python.exe" -m pip install --upgrade pip
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  ERROR: pip upgrade failed." -ForegroundColor Red
-        exit 1
-    }
-
-    & "mt5bridge\.venv\Scripts\python.exe" -m pip install -r mt5bridge\requirements.txt
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  ERROR: pip install failed." -ForegroundColor Red
-        exit 1
-    }
-
-    Write-Host "  Python requirements installed." -ForegroundColor Green
-}
-
-# [3/7] npm install
-Write-Host "[3/7] Installing Node.js dependencies..." -ForegroundColor Yellow
+# [2/5] npm install
+Write-Host "[2/5] Installing Node.js dependencies..." -ForegroundColor Yellow
 
 npm install
 
@@ -132,8 +37,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "  npm install OK." -ForegroundColor Green
 
-# [4/7] PM2
-Write-Host "[4/7] Installing PM2..." -ForegroundColor Yellow
+# [3/5] PM2
+Write-Host "[3/5] Installing PM2..." -ForegroundColor Yellow
 
 npm install -g pm2
 
@@ -145,13 +50,13 @@ if ($LASTEXITCODE -ne 0) {
 npm install -g pm2-windows-startup
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  WARNING: pm2-windows-startup failed, continuing." -ForegroundColor Yellow
+    Write-Host "  WARNING: pm2-windows-startup install failed, continuing." -ForegroundColor Yellow
 }
 
 Write-Host "  PM2 installed." -ForegroundColor Green
 
-# [5/7] .env file
-Write-Host "[5/7] Checking .env file..." -ForegroundColor Yellow
+# [4/5] .env file
+Write-Host "[4/5] Checking .env file..." -ForegroundColor Yellow
 
 if (-not (Test-Path ".env")) {
     if (Test-Path ".env.example") {
@@ -168,23 +73,9 @@ else {
     Write-Host "  .env already exists." -ForegroundColor Green
 }
 
-if (-not (Test-Path "mt5bridge\.env")) {
-    if (Test-Path "mt5bridge\.env.example") {
-        Copy-Item "mt5bridge\.env.example" "mt5bridge\.env"
-        Write-Host "  mt5bridge\.env created." -ForegroundColor Yellow
-        Write-Host "  IMPORTANT: Set MT5_API_KEY in mt5bridge\.env to match MT5_BRIDGE_API_KEY in .env" -ForegroundColor Red
-    }
-    else {
-        Write-Host "  WARNING: mt5bridge\.env.example not found." -ForegroundColor Yellow
-    }
-}
-else {
-    Write-Host "  mt5bridge\.env already exists." -ForegroundColor Green
-}
-
-# [6/7] Windows Firewall - port 3001 only
+# [5/5] Windows Firewall — port 3001
 if (-not $SkipFirewall) {
-    Write-Host "[6/7] Opening Windows Firewall port 3001..." -ForegroundColor Yellow
+    Write-Host "[5/5] Opening Windows Firewall port 3001..." -ForegroundColor Yellow
 
     $ruleName = "Alphamentals API port 3001"
     $existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
@@ -202,17 +93,14 @@ if (-not $SkipFirewall) {
 
         Write-Host "  Firewall rule created for port 3001." -ForegroundColor Green
     }
-
-    Write-Host "  NOTE: Port 8001 is NOT opened - bridge stays on 127.0.0.1 only." -ForegroundColor Cyan
 }
 else {
-    Write-Host "[6/7] Firewall step skipped." -ForegroundColor Yellow
+    Write-Host "[5/5] Firewall step skipped." -ForegroundColor Yellow
 }
 
-# [7/7] PM2 Windows startup
+# PM2 Windows startup (optional)
 if (-not $SkipPm2Startup) {
-    Write-Host "[7/7] Registering PM2 Windows startup..." -ForegroundColor Yellow
-
+    Write-Host "Registering PM2 Windows startup..." -ForegroundColor Yellow
     try {
         pm2-startup install
     }
@@ -220,15 +108,13 @@ if (-not $SkipPm2Startup) {
         Write-Host "  WARNING: pm2-startup install failed." -ForegroundColor Yellow
     }
 }
-else {
-    Write-Host "[7/7] PM2 startup step skipped." -ForegroundColor Yellow
-}
 
 Write-Host ""
 Write-Host "=== Install complete ===" -ForegroundColor Green
 Write-Host ""
 Write-Host "Next steps:"
-Write-Host "  1. Edit .env and set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, etc."
-Write-Host "  2. Edit mt5bridge\.env and set MT5_API_KEY, matching MT5_BRIDGE_API_KEY in .env"
-Write-Host "  3. Open MetaTrader 5 and log into your account"
-Write-Host "  4. Run: .\start.ps1"
+Write-Host "  1. Edit .env — set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, CORS_ORIGINS, etc."
+Write-Host "  2. Run: .\start.ps1"
+Write-Host "  3. Open MetaTrader 5, attach TradeBridgeEA to a chart, and enable Algo Trading."
+Write-Host "  4. In MT5: Tools -> Options -> Expert Advisors -> Allow WebRequest for listed URL:"
+Write-Host "       http://127.0.0.1:3001"

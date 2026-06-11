@@ -1,7 +1,7 @@
 /**
  * MT5 TradeBot API provider — talks to the self-hosted FastAPI bridge
  * https://github.com/Itszeeshanrajput/mt5-tradebot-api
- * Default base URL: http://127.0.0.1:8001/api/v1
+ * Default base URL: http://127.0.0.1:8000/api/v1
  */
 
 import type {
@@ -12,8 +12,29 @@ import type {
   MetaTraderHistoryDeal,
 } from './metaTrader.service.js';
 
-const BASE_URL = () => (process.env.MT5_TRADEBOT_API_URL ?? 'http://127.0.0.1:8001/api/v1').replace(/\/$/, '');
+const DEFAULT_MT5_BRIDGE_ROOT = 'http://127.0.0.1:8000';
+function bridgeRootUrl() {
+  const configured = process.env.MT5_BRIDGE_URL?.trim() || process.env.MT5_TRADEBOT_ROOT_URL?.trim() || DEFAULT_MT5_BRIDGE_ROOT;
+  return configured.replace(/\/+$/, '');
+}
+
+function apiBaseUrl() {
+  const explicitApiUrl = process.env.MT5_TRADEBOT_API_URL?.trim();
+  if (explicitApiUrl) return explicitApiUrl.replace(/\/+$/, '');
+  const root = bridgeRootUrl();
+  return root.endsWith('/api/v1') ? root : `${root}/api/v1`;
+}
+
 const TIMEOUT_MS = () => Number(process.env.MT5_TRADEBOT_API_TIMEOUT ?? 30_000);
+
+export function getMt5TradebotDiagnostics() {
+  return {
+    rootUrl: bridgeRootUrl(),
+    apiBaseUrl: apiBaseUrl(),
+    healthEndpoint: `${bridgeRootUrl()}/health`,
+    timeoutMs: TIMEOUT_MS(),
+  };
+}
 
 export interface MT5Symbol {
   name: string;
@@ -68,7 +89,9 @@ function sanitizeMt5Payload(body: RequestInit['body']) {
 }
 
 async function tradebotFetch<T>(path: string, options: RequestInit = {}): Promise<{ ok: boolean; status: number; data: T }> {
-  const url = `${BASE_URL()}${path}`;
+  const url = path.startsWith('http://') || path.startsWith('https://')
+    ? path
+    : `${apiBaseUrl()}${path}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS());
   try {
@@ -137,12 +160,17 @@ async function tradebotFetch<T>(path: string, options: RequestInit = {}): Promis
 /* ─── Health ─────────────────────────────────────────────────── */
 
 export async function mt5HealthCheck(): Promise<{ healthy: boolean; message: string }> {
+  const healthUrl = `${bridgeRootUrl()}/health`;
   try {
-    const res = await tradebotFetch<{ status?: string; message?: string }>('/health');
+    const res = await tradebotFetch<{ status?: string; message?: string }>(healthUrl);
     if (res.ok) return { healthy: true, message: res.data.message ?? 'MT5 API is healthy' };
-    return { healthy: false, message: `MT5 API returned ${res.status}` };
+    return { healthy: false, message: `MT5 API returned ${res.status}. Expected health endpoint: ${healthUrl}` };
   } catch (err) {
-    return { healthy: false, message: err instanceof Error ? err.message : 'MT5 API unreachable' };
+    const details = err instanceof Error ? err.message : 'MT5 API unreachable';
+    return {
+      healthy: false,
+      message: `MT5 TradeBot API is not running. Start it on Windows with: python main.py or python3 backend/main.py. Expected health endpoint: ${healthUrl}. ${details}`,
+    };
   }
 }
 
@@ -168,7 +196,7 @@ export async function mt5TradebotConnect(creds: MetaTraderCredentials): Promise<
       status: 'failed',
       error: {
         code: 'CONNECTION_UNAVAILABLE',
-        message: `MT5 TradeBot API is not running. Start it on Windows with 'python main.py' or 'python3 backend/main.py'. (${health.message})`,
+        message: health.message,
       },
     };
   }

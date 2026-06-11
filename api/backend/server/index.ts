@@ -20,6 +20,7 @@ import { ctraderRouter } from './routes/ctrader.js';
 import { saxoRouter } from './routes/saxo.js';
 import { mt5TrackingRouter } from './routes/mt5Tracking.js';
 import { tradingAccountsRouter } from './routes/tradingAccounts.js';
+import { accountsConnectRouter } from './routes/accountsConnect.js';
 import { accountOnboardingRouter } from './routes/accountOnboarding.js';
 import { fundamentalsRouter } from './routes/fundamentals.js';
 import { pairsRouter } from './routes/pairs.js';
@@ -50,6 +51,8 @@ import { startMarketDataScheduler, validateMarketDataEnv } from '../../src/serve
 import { getBridgeConfigDiagnostics } from '../../src/server/mt5BridgeQuotes.js';
 import { logOpenAIConfiguration } from './lib/openaiConfig.js';
 import { getPlaywrightStatus } from './services/system/playwrightStatus.service.js';
+import { getMt5TradebotDiagnostics } from './services/mt5TradebotApiProvider.js';
+import { logDatabaseStartupDiagnostics } from './lib/db.js';
 import {
   bootstrapMarketIntelligence,
   getFundamentalsPayload as getUnifiedFundamentalsPayload,
@@ -135,6 +138,9 @@ app.use('/api/ctrader', ctraderRouter);
 app.use('/api/saxo', saxoRouter);
 app.use('/api/mt5-tracking', mt5TrackingRouter);
 app.use('/api/trading-accounts', tradingAccountsRouter);
+// accountsConnectRouter must be mounted BEFORE tradingAccountsRouter so that
+// /connect, /:id/status, /:id/reconnect etc. are handled by the new MT5 flow.
+app.use('/api/accounts', accountsConnectRouter);
 app.use('/api/accounts', tradingAccountsRouter);
 app.use('/api/account-onboarding', accountOnboardingRouter);
 app.use('/api/fundamentals', fundamentalsRouter);
@@ -314,8 +320,11 @@ async function bootstrap() {
     console.log(`[alphamentals-api] cors origins loaded: ${ALLOWED_ORIGIN_STRINGS.join(', ')}`);
 
     const bridgeDiag = getBridgeConfigDiagnostics();
+    const mt5TradebotDiagnostics = getMt5TradebotDiagnostics();
     console.log(`[alphamentals-api] routes registered`);
     console.log(`[alphamentals-api] mt5 service initialized (bridge configured: ${bridgeDiag.mt5BridgeUrlConfigured})`);
+    console.log('[mt5-bridge] config', mt5TradebotDiagnostics);
+    logDatabaseStartupDiagnostics();
 
     await writeDiscoveryManifest(port);
     validateMarketDataEnv();
@@ -353,5 +362,13 @@ async function bootstrap() {
     });
   });
 }
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[process] unhandledRejection', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[process] uncaughtException', error);
+});
 
 void bootstrap();

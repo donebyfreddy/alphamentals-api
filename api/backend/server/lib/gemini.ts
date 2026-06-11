@@ -12,6 +12,11 @@ export interface ChatOptions {
   maxTokens?: number;
   temperature?: number;
   jsonMode?: boolean;
+  jsonSchema?: {
+    name: string;
+    schema: Record<string, unknown>;
+    strict?: boolean;
+  };
   /** Override the OpenAI model for this specific call. Defaults to OPENAI_MODEL env or gpt-4o-mini. */
   model?: string;
   /** Symbols this call covers — used for diagnostics. */
@@ -20,11 +25,13 @@ export interface ChatOptions {
   feature?: string;
   /** Operation label for cost ledger (e.g. generate_pair_fundamentals, analyze_signal). */
   operation?: string;
+  deferCostRecording?: boolean;
 }
 
 export interface ChatResponse {
   content: string;
   usage: { promptTokens: number; completionTokens: number };
+  model: string;
 }
 
 interface OpenAIChatResponse {
@@ -61,6 +68,80 @@ function extractTextContent(content: string | Array<{ type?: string; text?: stri
   return '';
 }
 
+function recordOpenAICost(params: {
+  modelName: string;
+  options: ChatOptions;
+  promptTokens: number;
+  completionTokens: number;
+  durationMs: number;
+  status: 'success' | 'failed' | 'partial' | 'failed_parse';
+  metadata?: Record<string, unknown>;
+}) {
+  const { modelName, options, promptTokens, completionTokens, durationMs, status, metadata } = params;
+  const { inputCostUsd, outputCostUsd, totalCostUsd } = calculateCost('openai', modelName, promptTokens, completionTokens);
+
+  recordCost({
+    provider: 'openai',
+    service: 'ai',
+    model: modelName,
+    feature: options.feature ?? 'unknown',
+    operation: options.operation ?? 'chat_complete',
+    status,
+    promptTokens,
+    completionTokens,
+    totalTokens: promptTokens + completionTokens,
+    inputCostUsd,
+    outputCostUsd,
+    totalCostUsd,
+    metadata: {
+      symbols: options.symbols ?? [],
+      durationMs,
+      estimated: promptTokens === 0,
+      ...(metadata ?? {}),
+    },
+  });
+}
+
+function stripCodeFences(value: string): string {
+  return value
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+}
+
+function repairJsonLike(value: string): string {
+  let repaired = stripCodeFences(value).trim();
+  const objectMatch = repaired.match(/\{[\s\S]*\}$/);
+  const arrayMatch = repaired.match(/\[[\s\S]*\]$/);
+  if (objectMatch) repaired = objectMatch[0];
+  else if (arrayMatch) repaired = arrayMatch[0];
+
+  repaired = repaired
+    .replace(/,\s*([}\]])/g, '$1')
+    .replace(/\u0000/g, '')
+    .trim();
+
+  return repaired;
+}
+
+function parseJsonWithFallback<T>(value: string): { data: T; repaired: boolean } {
+  try {
+    return { data: JSON.parse(value) as T, repaired: false };
+  } catch {
+    const stripped = stripCodeFences(value);
+    if (stripped !== value) {
+      try {
+        return { data: JSON.parse(stripped) as T, repaired: true };
+      } catch {
+        // continue to repair flow
+      }
+    }
+
+    const repaired = repairJsonLike(value);
+    return { data: JSON.parse(repaired) as T, repaired: true };
+  }
+}
+
 export async function chatComplete(messages: ChatMessage[], options: ChatOptions = {}): Promise<ChatResponse> {
   if (diag.isCoolingDown()) {
     const msLeft = diag.msUntilNextSlot();
@@ -81,7 +162,18 @@ export async function chatComplete(messages: ChatMessage[], options: ChatOptions
       temperature,
       max_tokens: maxTokens,
     };
-    if (options.jsonMode) body.response_format = { type: 'json_object' };
+    if (options.jsonSchema) {
+      body.response_format = {
+        type: 'json_schema',
+        json_schema: {
+          name: options.jsonSchema.name,
+          strict: options.jsonSchema.strict ?? true,
+          schema: options.jsonSchema.schema,
+        },
+      };
+    } else if (options.jsonMode) {
+      body.response_format = { type: 'json_object' };
+    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new DOMException(`timeout after ${timeoutMs}ms`, 'TimeoutError')), timeoutMs);
@@ -117,27 +209,21 @@ export async function chatComplete(messages: ChatMessage[], options: ChatOptions
 
     const promptTokens     = usage?.prompt_tokens     ?? 0;
     const completionTokens = usage?.completion_tokens ?? 0;
-    const { inputCostUsd, outputCostUsd, totalCostUsd } = calculateCost('openai', modelName, promptTokens, completionTokens);
-
-    recordCost({
-      provider: 'openai',
-      service:  'ai',
-      model:    modelName,
-      feature:  options.feature   ?? 'unknown',
-      operation: options.operation ?? 'chat_complete',
-      status:   'success',
-      promptTokens,
-      completionTokens,
-      totalTokens: promptTokens + completionTokens,
-      inputCostUsd,
-      outputCostUsd,
-      totalCostUsd,
-      metadata: { symbols: options.symbols ?? [], durationMs, estimated: promptTokens === 0 },
-    });
+    if (!options.deferCostRecording) {
+      recordOpenAICost({
+        modelName,
+        options,
+        promptTokens,
+        completionTokens,
+        durationMs,
+        status: 'success',
+      });
+    }
 
     return {
       content,
       usage: { promptTokens, completionTokens },
+      model: modelName,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -152,13 +238,45 @@ export async function chatComplete(messages: ChatMessage[], options: ChatOptions
 }
 
 export async function chatCompleteJSON<T>(messages: ChatMessage[], options?: ChatOptions): Promise<T> {
-  const response = await chatComplete(messages, { ...options, jsonMode: true });
-  const match = /\{[\s\S]*\}/.exec(response.content);
-  if (!match) {
-    const retry = await chatComplete(messages, { ...options, jsonMode: false });
-    const retryMatch = /\{[\s\S]*\}/.exec(retry.content);
-    if (!retryMatch) throw new Error('No JSON object in model response after retry');
-    return JSON.parse(retryMatch[0]) as T;
+  const startedAt = Date.now();
+  const response = await chatComplete(messages, { ...options, jsonMode: true, deferCostRecording: true });
+  const promptTokens = response.usage.promptTokens;
+  const completionTokens = response.usage.completionTokens;
+  const preview = response.content.slice(0, 600);
+
+  try {
+    const parsed = parseJsonWithFallback<T>(response.content);
+    recordOpenAICost({
+      modelName: response.model,
+      options: options ?? {},
+      promptTokens,
+      completionTokens,
+      durationMs: Date.now() - startedAt,
+      status: parsed.repaired ? 'partial' : 'success',
+      metadata: parsed.repaired ? { repairedJson: true } : undefined,
+    });
+    return parsed.data;
+  } catch (firstError) {
+    console.warn('[openai] JSON parse failed', {
+      operation: options?.operation ?? 'chat_complete_json',
+      feature: options?.feature ?? 'unknown',
+      preview,
+      error: firstError instanceof Error ? firstError.message : String(firstError),
+    });
+
+    recordOpenAICost({
+      modelName: response.model,
+      options: options ?? {},
+      promptTokens,
+      completionTokens,
+      durationMs: Date.now() - startedAt,
+      status: 'failed_parse',
+      metadata: { preview },
+    });
+
+    const parseError = new Error(`OPENAI_JSON_PARSE_FAILED: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
+    (parseError as Error & { code?: string; rawPreview?: string }).code = 'OPENAI_JSON_PARSE_FAILED';
+    (parseError as Error & { code?: string; rawPreview?: string }).rawPreview = preview;
+    throw parseError;
   }
-  return JSON.parse(match[0]) as T;
 }

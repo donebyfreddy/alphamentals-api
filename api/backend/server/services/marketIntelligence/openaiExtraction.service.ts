@@ -8,6 +8,12 @@ import type {
 } from '../../types/marketIntelligence.js';
 import { getConfiguredOpenAIApiKey, getOpenAIModel } from '../../lib/openaiConfig.js';
 
+const eventExtractionSummarySchema = z.object({
+  highImpactCount: z.number().int().min(0).default(0),
+  currenciesAffected: z.array(z.string()).default([]),
+  riskWarning: z.string().default(''),
+});
+
 const eventSchema = z.object({
   title: z.string().min(2),
   country: z.string().optional().default(''),
@@ -28,6 +34,15 @@ const eventSchema = z.object({
     bias: z.enum(['bullish', 'bearish', 'neutral', 'mixed']).default('neutral'),
     reason: z.string().default('Awaiting more context'),
   }).optional(),
+});
+
+const eventExtractionPayloadSchema = z.object({
+  events: z.array(eventSchema).default([]),
+  summary: eventExtractionSummarySchema.default({
+    highImpactCount: 0,
+    currenciesAffected: [],
+    riskWarning: '',
+  }),
 });
 
 const classifiedArticleSchema = z.object({
@@ -74,18 +89,48 @@ export class OpenAIExtractionService {
     if (!hasOpenAI() || !text.trim()) return [];
 
     try {
-      const payload = await chatCompleteJSON<{ events: Array<z.infer<typeof eventSchema>> }>([
+      const payload = await chatCompleteJSON<z.infer<typeof eventExtractionPayloadSchema>>([
         {
           role: 'system',
-          content: 'Extract economic calendar events from raw webpage text. Return JSON only.',
+          content: 'Extract economic calendar events from raw webpage text. Return strict JSON only. Never return markdown.',
         },
         {
           role: 'user',
           content: `Source: ${sourceName}
 
-Return only valid JSON with shape {"events":[...]}.
-Normalize impact to low|medium|high.
-If the text is not a calendar, return {"events":[]}.
+Return only valid JSON with this exact shape:
+{
+  "events": [
+    {
+      "date": "YYYY-MM-DD",
+      "time": "HH:mm or empty string",
+      "currency": "USD/EUR/GBP/JPY/XAU/CAD/AUD/NZD/CHF/etc",
+      "impact": "low|medium|high",
+      "title": "string",
+      "country": "string",
+      "datetime": "ISO string or empty string",
+      "actual": "string|null",
+      "forecast": "string|null",
+      "previous": "string|null",
+      "unit": "string|null",
+      "url": "string|null",
+      "aiSummary": "string",
+      "tradingContext": {
+        "affectedSymbols": ["string"],
+        "riskWindowMinutes": 30,
+        "bias": "bullish|bearish|neutral|mixed",
+        "reason": "string"
+      }
+    }
+  ],
+  "summary": {
+    "highImpactCount": 0,
+    "currenciesAffected": [],
+    "riskWarning": "string"
+  }
+}
+
+If the text is not a calendar, return {"events":[],"summary":{"highImpactCount":0,"currenciesAffected":[],"riskWarning":"No economic calendar events found."}}.
 Text:
 ${text.slice(0, 18_000)}`,
         },
@@ -95,10 +140,72 @@ ${text.slice(0, 18_000)}`,
         maxTokens: 1600,
         feature: 'fundamentals',
         operation: 'extract_economic_events_from_text',
+        jsonSchema: {
+          name: 'economic_event_extraction',
+          strict: true,
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['events', 'summary'],
+            properties: {
+              events: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['date', 'time', 'currency', 'impact', 'title', 'actual', 'forecast', 'previous', 'source'],
+                  properties: {
+                    date: { type: 'string' },
+                    time: { type: 'string' },
+                    currency: { type: 'string' },
+                    impact: { type: 'string', enum: ['low', 'medium', 'high'] },
+                    title: { type: 'string' },
+                    country: { type: 'string' },
+                    datetime: { type: 'string' },
+                    actual: { type: ['string', 'null'] },
+                    forecast: { type: ['string', 'null'] },
+                    previous: { type: ['string', 'null'] },
+                    unit: { type: ['string', 'null'] },
+                    url: { type: ['string', 'null'] },
+                    aiSummary: { type: 'string' },
+                    source: { type: 'string' },
+                    tradingContext: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['affectedSymbols', 'riskWindowMinutes', 'bias', 'reason'],
+                      properties: {
+                        affectedSymbols: { type: 'array', items: { type: 'string' } },
+                        riskWindowMinutes: { type: 'integer' },
+                        bias: { type: 'string', enum: ['bullish', 'bearish', 'neutral', 'mixed'] },
+                        reason: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+              summary: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['highImpactCount', 'currenciesAffected', 'riskWarning'],
+                properties: {
+                  highImpactCount: { type: 'integer' },
+                  currenciesAffected: { type: 'array', items: { type: 'string' } },
+                  riskWarning: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
       });
 
-      const parsed = z.object({ events: z.array(eventSchema).default([]) }).safeParse(payload);
-      if (!parsed.success) return [];
+      const parsed = eventExtractionPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        console.warn('[openai] economic event extraction schema validation failed', {
+          source: sourceName,
+          issueCount: parsed.error.issues.length,
+        });
+        return [];
+      }
 
       return parsed.data.events.map((event) => {
         const datetime = event.datetime || (event.date && event.time ? `${event.date}T${event.time}:00` : event.date);
@@ -127,7 +234,13 @@ ${text.slice(0, 18_000)}`,
         };
       });
     } catch (error) {
-      console.warn('[openai] economic event extraction failed:', error instanceof Error ? error.message : String(error));
+      const rawPreview = error instanceof Error && 'rawPreview' in error ? String((error as { rawPreview?: string }).rawPreview ?? '') : '';
+      console.warn('[openai] economic event extraction failed:', {
+        source: sourceName,
+        code: error instanceof Error && 'code' in error ? String((error as { code?: string }).code ?? 'UNKNOWN') : 'UNKNOWN',
+        message: error instanceof Error ? error.message : String(error),
+        rawPreview,
+      });
       return [];
     }
   }

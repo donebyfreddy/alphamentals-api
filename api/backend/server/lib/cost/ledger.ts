@@ -16,7 +16,7 @@ export interface CostEvent {
   feature?: string;          // fundamentals | pair_intelligence | telegram | journal | checklist
   operation?: string;        // generate_pair_fundamentals | analyze_signal | etc.
   requestId?: string;
-  status: 'success' | 'failed' | 'estimated';
+  status: 'success' | 'failed' | 'estimated' | 'partial' | 'failed_parse';
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;

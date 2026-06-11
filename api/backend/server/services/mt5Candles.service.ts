@@ -2,7 +2,7 @@
  * MT5 candle service — the ONLY candle source for technical analysis.
  *
  * Candles come exclusively from the Windows VPS MetaTrader 5 terminal via the
- * local Python MT5 bridge (http://127.0.0.1:8001). No external candle
+ * local Python MT5 bridge (http://127.0.0.1:8000). No external candle
  * providers (TradingView/Yahoo/TwelveData/...) are used here.
  *
  * Caching is tiered to avoid hammering the terminal:
@@ -68,7 +68,7 @@ const CACHE_TTL_MS: Record<Mt5Timeframe, number> = {
 };
 
 function bridgeBaseUrl(): string {
-  return (process.env.MT5_BRIDGE_URL ?? 'http://127.0.0.1:8001').replace(/\/+$/, '');
+  return (process.env.MT5_BRIDGE_URL ?? 'http://127.0.0.1:8000').replace(/\/+$/, '');
 }
 
 function bridgeTimeoutMs(): number {

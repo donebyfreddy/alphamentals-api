@@ -224,6 +224,9 @@ telegramRouter.post('/sync', async (req, res) => {
     return res.json(result);
   } catch (error) {
     const normalized = normalizeTelegramRouteError(error);
+    if (normalized.retryAfterSeconds) {
+      res.setHeader('Retry-After', String(normalized.retryAfterSeconds));
+    }
     const accountLabel = normalized.account?.username
       ? `@${normalized.account.username}`
       : normalized.account?.displayName ?? null;
@@ -235,6 +238,7 @@ telegramRouter.post('/sync', async (req, res) => {
       resolvedChat: normalized.targetChatInfo ?? null,
       messagesFetched: null,
       messagesSaved: 0,
+      retryAfterSeconds: normalized.retryAfterSeconds ?? null,
       name: normalized.telegramError ?? 'TelegramSyncError',
       message: normalized.message,
       code: normalized.code ?? 'TELEGRAM_UNAVAILABLE',
@@ -242,8 +246,27 @@ telegramRouter.post('/sync', async (req, res) => {
       raw: normalized.rawMessage ?? normalized.details ?? null,
       hints: normalized.hints ?? [],
     });
+
+    if (normalized.code === 'RATE_LIMITED') {
+      return res.status(429).json({
+        ok: false,
+        code: 'RATE_LIMITED',
+        message: normalized.message,
+        retryAfterSeconds: normalized.retryAfterSeconds ?? 0,
+      });
+    }
+
+    if (normalized.code === 'SYNC_IN_PROGRESS') {
+      return res.status(409).json({
+        ok: false,
+        code: 'SYNC_IN_PROGRESS',
+        message: 'Telegram sync already running.',
+      });
+    }
+
     return res.status(normalized.status).json({
       success: false,
+      ok: false,
       phase: normalized.phase ?? 'unknown',
       message: normalized.message,
       imported: 0,
@@ -260,9 +283,10 @@ telegramRouter.post('/sync', async (req, res) => {
       loginOk: normalized.loginOk ?? false,
       targetChatResolved: normalized.targetChatResolved ?? false,
       canReadMessages: normalized.canReadMessages ?? false,
-        details: normalized.details ?? normalized.rawMessage ?? null,
-        stack: normalized.stack ?? null,
-        hints: normalized.hints ?? [],
+      retryAfterSeconds: normalized.retryAfterSeconds ?? null,
+      details: normalized.details ?? normalized.rawMessage ?? null,
+      stack: normalized.stack ?? null,
+      hints: normalized.hints ?? [],
     });
   }
 });
@@ -285,6 +309,27 @@ telegramRouter.post('/cron', async (req, res) => {
     return res.json(result);
   } catch (error) {
     const normalized = normalizeTelegramRouteError(error);
+    if (normalized.retryAfterSeconds) {
+      res.setHeader('Retry-After', String(normalized.retryAfterSeconds));
+    }
+
+    if (normalized.code === 'RATE_LIMITED') {
+      return res.status(429).json({
+        ok: false,
+        code: 'RATE_LIMITED',
+        message: normalized.message,
+        retryAfterSeconds: normalized.retryAfterSeconds ?? 0,
+      });
+    }
+
+    if (normalized.code === 'SYNC_IN_PROGRESS') {
+      return res.status(409).json({
+        ok: false,
+        code: 'SYNC_IN_PROGRESS',
+        message: 'Telegram sync already running.',
+      });
+    }
+
     return res.status(normalized.status).json({
       ok: false,
       checkedChannels: 0,
@@ -294,11 +339,14 @@ telegramRouter.post('/cron', async (req, res) => {
       errors: [normalized.message],
       phase: normalized.phase ?? 'unknown',
       errorCode: normalized.code ?? 'TELEGRAM_UNAVAILABLE',
+      retryAfterSeconds: normalized.retryAfterSeconds ?? null,
       details: normalized.details ?? normalized.rawMessage ?? null,
       hints: normalized.hints ?? [],
     });
   }
 });
+
+const VALID_MODES = new Set(['all', 'signals', 'limit_orders']);
 
 telegramRouter.get('/messages/recent', async (req, res) => {
   try {
@@ -306,30 +354,40 @@ telegramRouter.get('/messages/recent', async (req, res) => {
     const symbol = typeof req.query.symbol === 'string' ? req.query.symbol : undefined;
     const messageType = typeof req.query.messageType === 'string' ? req.query.messageType : undefined;
     const direction = typeof req.query.direction === 'string' ? req.query.direction : undefined;
+    const rawMode = typeof req.query.mode === 'string' ? req.query.mode : 'all';
+    const mode = VALID_MODES.has(rawMode) ? (rawMode as 'all' | 'signals' | 'limit_orders') : 'all';
 
     console.log('[Telegram] /api/telegram/messages/recent request received', {
       phase: 'frontend_request',
       operation: 'recent_messages',
       limit: Number.isFinite(limit) ? limit : 30,
+      mode,
       symbol: symbol ?? null,
       messageType: messageType ?? null,
       direction: direction ?? null,
     });
-    const messages = await getRecentTelegramMessages({
+
+    const result = await getRecentTelegramMessages({
       limit: Number.isFinite(limit) ? limit : 30,
       symbol,
       messageType,
       direction,
+      mode,
     });
 
-    console.log('[Telegram] Returning messages to UI...', {
+    console.log('[Telegram] UI payload ready', {
       phase: 'frontend_response',
       operation: 'recent_messages',
-      returned: messages.length,
+      mode,
+      returned: result.meta.returned,
+      fetchedBeforeFilter: result.meta.fetchedBeforeFilter,
+      messagesFetchedLastSync: result.meta.messagesFetchedLastSync,
+      messagesSavedLastSync: result.meta.messagesSavedLastSync,
+      messagesSkippedLastSync: result.meta.messagesSkippedLastSync,
+      filterReason: result.meta.filterReason ?? null,
     });
-    console.log(`[Telegram] UI payload size: ${messages.length}`);
 
-    return res.json(messages);
+    return res.json({ ok: true, messages: result.messages, meta: result.meta });
   } catch (error) {
     const normalized = normalizeTelegramRouteError(error);
     console.error('[Telegram] Recent messages request failed:', {
@@ -339,7 +397,7 @@ telegramRouter.get('/messages/recent', async (req, res) => {
       code: normalized.code ?? null,
       stack: normalized.stack ?? null,
     });
-    return res.status(normalized.status).json({ error: normalized.message });
+    return res.status(normalized.status).json({ ok: false, error: normalized.message });
   }
 });
 

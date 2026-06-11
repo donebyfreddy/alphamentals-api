@@ -1,6 +1,6 @@
 import { Router, type Request } from 'express';
 import { canRunScheduledAiAnalysis, runAiAnalysis } from '../services/aiAnalysisRuns.service.js';
-import { syncTelegramSignals } from '../services/telegramInfo.service.js';
+import { normalizeTelegramRouteError, syncTelegramSignals } from '../services/telegramInfo.service.js';
 
 export const cronRouter = Router();
 
@@ -26,15 +26,39 @@ cronRouter.post('/telegram-sync', async (req, res) => {
     });
     return res.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Telegram cron sync failed';
-    console.error('[Telegram cron] Failed:', message);
-    return res.status(500).json({
+    const normalized = normalizeTelegramRouteError(error);
+    if (normalized.retryAfterSeconds) {
+      res.setHeader('Retry-After', String(normalized.retryAfterSeconds));
+    }
+    console.error('[Telegram cron] Failed:', {
+      code: normalized.code ?? 'TELEGRAM_UNAVAILABLE',
+      message: normalized.message,
+      phase: normalized.phase ?? 'unknown',
+      retryAfterSeconds: normalized.retryAfterSeconds ?? null,
+    });
+    if (normalized.code === 'RATE_LIMITED') {
+      return res.status(429).json({
+        ok: false,
+        code: 'RATE_LIMITED',
+        message: normalized.message,
+        retryAfterSeconds: normalized.retryAfterSeconds ?? 0,
+      });
+    }
+    if (normalized.code === 'SYNC_IN_PROGRESS') {
+      return res.status(409).json({
+        ok: false,
+        code: 'SYNC_IN_PROGRESS',
+        message: 'Telegram sync already running.',
+      });
+    }
+    return res.status(normalized.status).json({
       ok: false,
       checkedChannels: 0,
       newMessages: 0,
       newSignals: 0,
       emailsSent: 0,
-      errors: [message],
+      errors: [normalized.message],
+      errorCode: normalized.code ?? 'TELEGRAM_UNAVAILABLE',
     });
   }
 });

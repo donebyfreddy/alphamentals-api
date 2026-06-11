@@ -36,6 +36,9 @@ type SyncState = {
   lastNewMessages: number;
   lastNewSignals: number;
   lastEmailsSent: number;
+  messagesFetchedLastSync: number;
+  messagesSavedLastSync: number;
+  messagesSkippedLastSync: number;
 };
 
 type TelegramSignalSyncResult = {
@@ -54,6 +57,8 @@ type TelegramSignalSyncResult = {
 };
 
 type TelegramSyncLogContext = {
+  phase?: string | null;
+  operation?: string | null;
   accountLabel?: string | null;
   checkedChannels?: number | null;
   targetChat?: string | null;
@@ -63,6 +68,7 @@ type TelegramSyncLogContext = {
   messagesFetched?: number | null;
   messagesSaved?: number | null;
   messagesSkipped?: number | null;
+  retryAfterSeconds?: number | null;
 };
 
 const syncState: SyncState = {
@@ -74,13 +80,40 @@ const syncState: SyncState = {
   lastNewMessages: 0,
   lastNewSignals: 0,
   lastEmailsSent: 0,
+  messagesFetchedLastSync: 0,
+  messagesSavedLastSync: 0,
+  messagesSkippedLastSync: 0,
 };
 
 // Prevents two overlapping sync jobs from running simultaneously.
 let syncInFlight = false;
 
-const SYNC_RATE_LIMIT_MS = 30_000;
+const SYNC_RATE_LIMIT_MS = Number(process.env.TELEGRAM_SYNC_RATE_LIMIT_MS ?? 30_000);
 let lastSyncRequestAt = 0;
+
+class TelegramSyncControlError extends Error {
+  code: 'RATE_LIMITED' | 'SYNC_IN_PROGRESS';
+  status: number;
+  retryAfterSeconds: number | null;
+  phase: string;
+  operation: string;
+
+  constructor(params: {
+    code: 'RATE_LIMITED' | 'SYNC_IN_PROGRESS';
+    message: string;
+    status: number;
+    retryAfterSeconds?: number | null;
+    phase?: string;
+    operation?: string;
+  }) {
+    super(params.message);
+    this.code = params.code;
+    this.status = params.status;
+    this.retryAfterSeconds = params.retryAfterSeconds ?? null;
+    this.phase = params.phase ?? 'sync_control';
+    this.operation = params.operation ?? 'syncTelegramSignals';
+  }
+}
 
 /** Called by the background scheduler so the status endpoint can show the next run time. */
 export function setSyncScheduleMetadata(nextSyncAt: Date): void {
@@ -121,7 +154,12 @@ function enforceSyncRateLimit() {
   const now = Date.now();
   if (now - lastSyncRequestAt < SYNC_RATE_LIMIT_MS) {
     const retrySeconds = Math.ceil((SYNC_RATE_LIMIT_MS - (now - lastSyncRequestAt)) / 1000);
-    throw new Error(`Too many sync requests. Retry in ${retrySeconds} seconds.`);
+    throw new TelegramSyncControlError({
+      code: 'RATE_LIMITED',
+      message: `Too many sync requests. Retry in ${retrySeconds} seconds.`,
+      status: 429,
+      retryAfterSeconds: retrySeconds,
+    });
   }
   lastSyncRequestAt = now;
 }
@@ -146,6 +184,9 @@ function updateSyncMetrics(result: TelegramSignalSyncResult) {
   syncState.lastNewMessages = result.newMessages;
   syncState.lastNewSignals = result.newSignals;
   syncState.lastEmailsSent = result.emailsSent;
+  syncState.messagesFetchedLastSync = result.messagesFetched;
+  syncState.messagesSavedLastSync = result.imported;
+  syncState.messagesSkippedLastSync = result.skipped;
 }
 
 function logTelegramSyncStep(message: string, context: TelegramSyncLogContext = {}) {
@@ -244,7 +285,11 @@ async function runTelegramSync(limit: number, source: TelegramSignalSyncResult['
   const runtime = getTelegramRuntimeState();
   const config = getTelegramEnvConfig();
 
-  logTelegramSyncStep('Sync started', { messagesRequested: clampedLimit });
+  logTelegramSyncStep('Sync started', {
+    phase: 'start',
+    operation: 'syncTelegramSignals',
+    messagesRequested: clampedLimit,
+  });
 
   // Use cached runtime state for labels — avoids a redundant testTelegramConnection()
   // subprocess call (which would add up to 30s before the real fetch even starts,
@@ -255,16 +300,33 @@ async function runTelegramSync(limit: number, source: TelegramSignalSyncResult['
   const resolvedChatType = runtime.targetChatType ?? null;
   const checkedChannels = targetChat ? 1 : 0;
 
-  logTelegramSyncStep('Sync using cached session state', { accountLabel, targetChat, resolvedChat, resolvedChatType });
+  logTelegramSyncStep('Sync using cached session state', {
+    phase: 'session',
+    operation: 'syncTelegramSignals',
+    accountLabel,
+    targetChat,
+    resolvedChat,
+    resolvedChatType,
+  });
 
   // cursor: numeric chat_id stored by previous syncs; may be null if the monitor
   // hasn't resolved the chat yet — in that case we fall back to the latest N messages
   // and rely on duplicate detection at insert time.
   const latestMessageId = targetChat ? await getLatestTelegramMessageIdForChat(targetChat).catch(() => null) : null;
   if (latestMessageId) {
-    logTelegramSyncStep(`Stored last processed message ID for channel: ${latestMessageId}`, { targetChat, resolvedChat });
+    logTelegramSyncStep(`Stored last processed message ID for channel: ${latestMessageId}`, {
+      phase: 'cursor',
+      operation: 'syncTelegramSignals',
+      targetChat,
+      resolvedChat,
+    });
   } else {
-    logTelegramSyncStep('No stored message cursor found for channel. Fetching recent history.', { targetChat, resolvedChat });
+    logTelegramSyncStep('No stored message cursor found for channel. Fetching recent history.', {
+      phase: 'cursor',
+      operation: 'syncTelegramSignals',
+      targetChat,
+      resolvedChat,
+    });
   }
 
   const result = await fetchTelegramHistory(clampedLimit, latestMessageId);
@@ -272,8 +334,17 @@ async function runTelegramSync(limit: number, source: TelegramSignalSyncResult['
   const fetchedCount = result.messages_fetched ?? messages.length;
   const effectiveResolvedChat = result.chat?.title ?? resolvedChat;
 
-  logTelegramSyncStep('Channels checked', { checkedChannels, accountLabel, targetChat, resolvedChat: effectiveResolvedChat });
+  logTelegramSyncStep('Channels checked', {
+    phase: 'fetch',
+    operation: 'syncTelegramSignals',
+    checkedChannels,
+    accountLabel,
+    targetChat,
+    resolvedChat: effectiveResolvedChat,
+  });
   logTelegramSyncStep('Messages fetched', {
+    phase: 'fetch',
+    operation: 'syncTelegramSignals',
     accountLabel,
     targetChat,
     resolvedChat: effectiveResolvedChat,
@@ -409,6 +480,8 @@ async function runTelegramSync(limit: number, source: TelegramSignalSyncResult['
 
   updateSyncMetrics(syncResult);
   logTelegramSyncStep('Sync finished', {
+    phase: 'finish',
+    operation: 'syncTelegramSignals',
     accountLabel,
     targetChat,
     resolvedChat: effectiveResolvedChat,
@@ -416,18 +489,39 @@ async function runTelegramSync(limit: number, source: TelegramSignalSyncResult['
     messagesSaved: imported,
     messagesSkipped: skipped,
   });
-  logTelegramSyncStep('Valid signals parsed', { targetChat, resolvedChat: effectiveResolvedChat, messagesSaved: newSignals });
-  logTelegramSyncStep('Emails sent', { targetChat, resolvedChat: effectiveResolvedChat, messagesSaved: emailsSent });
+  logTelegramSyncStep('Valid signals parsed', {
+    phase: 'finish',
+    operation: 'syncTelegramSignals',
+    targetChat,
+    resolvedChat: effectiveResolvedChat,
+    messagesSaved: newSignals,
+  });
+  logTelegramSyncStep('Emails sent', {
+    phase: 'finish',
+    operation: 'syncTelegramSignals',
+    targetChat,
+    resolvedChat: effectiveResolvedChat,
+    messagesSaved: emailsSent,
+  });
   return syncResult;
 }
 
 export async function syncTelegramSignals(limit = 10, options: { source?: TelegramSignalSyncResult['source']; enforceRateLimit?: boolean } = {}) {
   const source = options.source ?? 'manual';
-  if (options.enforceRateLimit ?? source === 'manual') {
-    enforceSyncRateLimit();
-  }
   if (!acquireSyncLock()) {
-    throw new Error('Sync already in progress. Please wait for the current sync to complete.');
+    throw new TelegramSyncControlError({
+      code: 'SYNC_IN_PROGRESS',
+      message: 'Telegram sync already running.',
+      status: 409,
+    });
+  }
+  if (options.enforceRateLimit ?? source === 'manual') {
+    try {
+      enforceSyncRateLimit();
+    } catch (error) {
+      releaseSyncLock(error instanceof Error ? error.message : 'Telegram sync rate limited');
+      throw error;
+    }
   }
 
   try {
@@ -471,42 +565,67 @@ export async function getRecentTelegramMessages(filter: {
   symbol?: string;
   messageType?: string;
   direction?: string;
+  mode?: 'all' | 'signals' | 'limit_orders';
 }) {
+  const mode = filter.mode ?? 'all';
   console.log('[Telegram] UI message query started', {
     phase: 'frontend_response',
     operation: 'listRecentTelegramMessages',
+    mode,
     filters: filter,
   });
-  const messages = await listRecentTelegramMessages(filter);
-  const limitMessages = messages.filter((message) => isTelegramLimitOrderSignal(message.rawText, {
-    messageType: message.messageType,
-    direction: message.direction,
-  }));
+
+  const messages = await listRecentTelegramMessages({
+    limit: filter.limit,
+    symbol: filter.symbol,
+    messageType: filter.messageType,
+    direction: filter.direction,
+  });
+
+  let filtered = messages;
+  if (mode === 'limit_orders') {
+    filtered = messages.filter((m) => isTelegramLimitOrderSignal(m.rawText, {
+      messageType: m.messageType,
+      direction: m.direction,
+    }));
+  } else if (mode === 'signals') {
+    filtered = messages.filter((m) => m.messageType === 'SIGNAL');
+  }
+
+  let filterReason: string | null = null;
+  if (mode === 'limit_orders' && messages.length > 0 && filtered.length === 0) {
+    filterReason = 'Messages exist but none match BUY LIMIT / SELL LIMIT pattern.';
+  } else if (mode === 'signals' && messages.length > 0 && filtered.length === 0) {
+    filterReason = 'Messages exist but none are classified as SIGNAL (may need a fresh sync).';
+  } else if (messages.length === 0) {
+    filterReason = 'No messages in database — trigger a sync first.';
+  }
+
   console.log('[Telegram] UI message query result', {
     phase: 'frontend_response',
     operation: 'listRecentTelegramMessages',
-    returned: limitMessages.length,
+    mode,
+    returned: filtered.length,
     fetchedBeforeFilter: messages.length,
-    filters: filter,
+    messagesFetchedLastSync: syncState.messagesFetchedLastSync,
+    messagesSavedLastSync: syncState.messagesSavedLastSync,
+    messagesSkippedLastSync: syncState.messagesSkippedLastSync,
+    filterReason,
   });
-  if (messages.length > 0 && limitMessages.length === 0) {
-    console.warn('[Telegram] Messages fetched but filtered out because they are not BUY LIMIT / SELL LIMIT signals.', {
-      phase: 'frontend_response',
-      operation: 'listRecentTelegramMessages',
+
+  return {
+    messages: filtered,
+    meta: {
+      returned: filtered.length,
       fetchedBeforeFilter: messages.length,
-      returned: 0,
-      hint: 'Only pending limit order signals are shown in the dashboard.',
-    });
-  }
-  if (limitMessages.length === 0) {
-    console.warn('[Telegram] UI query returned 0 saved messages.', {
-      phase: 'frontend_response',
-      operation: 'listRecentTelegramMessages',
-      filters: filter,
-      hint: 'Messages may have been filtered out because they are not BUY LIMIT / SELL LIMIT signals, skipped as duplicates, not saved, or frontend filters removed them.',
-    });
-  }
-  return limitMessages;
+      mode,
+      messagesFetchedLastSync: syncState.messagesFetchedLastSync,
+      messagesSavedLastSync: syncState.messagesSavedLastSync,
+      messagesSkippedLastSync: syncState.messagesSkippedLastSync,
+      lastSyncAt: syncState.lastSyncAt,
+      filterReason,
+    },
+  };
 }
 
 export async function analyzeTelegramMessage(messageId: string) {
@@ -628,6 +747,21 @@ function derivePhaseMessage(args: {
 }
 
 export function normalizeTelegramRouteError(error: unknown) {
+  if (error instanceof TelegramSyncControlError) {
+    return {
+      status: error.status,
+      message: error.message,
+      rawMessage: error.message,
+      code: error.code,
+      phase: error.phase,
+      operation: error.operation,
+      retryAfterSeconds: error.retryAfterSeconds,
+      stack: null,
+      hints: error.code === 'RATE_LIMITED'
+        ? ['Wait for retryAfterSeconds before calling /api/telegram/sync again.']
+        : ['Avoid triggering a second manual sync while the current job is running.'],
+    };
+  }
   if (error instanceof TelegramBridgeError) {
     return {
       status: error.status,

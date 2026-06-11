@@ -1,5 +1,6 @@
 import { execute } from '../lib/db.js';
 import { supabase } from '../lib/supabase.js';
+import { getDatabaseUrlDiagnostics } from '../lib/db.js';
 import type { MetaTraderAccountSnapshot, MetaTraderConnectResult, MetaTraderCredentials } from './metaTrader.service.js';
 import { connectMetaTrader, getBridgeStatus } from './metaTrader.service.js';
 import { createNotification } from './notification.service.js';
@@ -111,7 +112,15 @@ async function ensureTradeImportColumns() {
       WHERE "externalTradeId" IS NOT NULL AND "importSource" IS NOT NULL;
     `);
   } catch (err) {
-    console.warn('[MT5 Sync] Could not ensure trade import columns (safe to ignore if table was pre-created by migration):', err instanceof Error ? err.message : String(err));
+    const diagnostics = getDatabaseUrlDiagnostics();
+    console.warn('[MT5 Sync] Could not ensure trade import columns (safe to ignore if table was pre-created by migration):', {
+      code: diagnostics.issueCode ?? 'DATABASE_CONFIG_INVALID',
+      message: err instanceof Error ? err.message : String(err),
+      databaseConfigured: diagnostics.configured,
+      databaseParseable: diagnostics.parseable,
+      hostname: diagnostics.hostname,
+      hint: 'DATABASE_URL should be a valid Supabase PostgreSQL connection string.',
+    });
   }
 }
 

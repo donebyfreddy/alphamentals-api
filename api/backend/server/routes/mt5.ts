@@ -43,7 +43,7 @@ mt5Router.get('/status', async (_req, res) => {
     provider: 'windows-vps-mt5',
     metaapiEnabled: false,
     mt5: {
-      bridgeUrl: bridge?.bridgeUrl ?? process.env.MT5_BRIDGE_URL ?? 'http://127.0.0.1:8001',
+      bridgeUrl: bridge?.bridgeUrl ?? process.env.MT5_BRIDGE_URL ?? 'http://127.0.0.1:8000',
       bridgeReachable: bridge?.bridgeReachable ?? false,
       terminalConnected: bridge?.terminalConnected ?? false,
       accountLogin: bridge?.accountLogin ?? (hb?.account ? String(hb.accountId) : null),

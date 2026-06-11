@@ -1,18 +1,19 @@
 /**
  * MT5 TradeBot API provider — talks to the self-hosted FastAPI bridge
- * https://github.com/Itszeeshanrajput/mt5-tradebot-api
- * Default base URL: http://127.0.0.1:8000/api/v1
+ * Default base URL: http://127.0.0.1:8001/api/v1
  */
 
 import type {
   MetaTraderCredentials,
   MetaTraderConnectResult,
+  MetaTraderErrorPayload,
   MetaTraderAccountSnapshot,
   MetaTraderPosition,
   MetaTraderHistoryDeal,
 } from './metaTrader.service.js';
 
-const DEFAULT_MT5_BRIDGE_ROOT = 'http://127.0.0.1:8000';
+const DEFAULT_MT5_BRIDGE_ROOT = 'http://127.0.0.1:8001';
+
 function bridgeRootUrl() {
   const configured = process.env.MT5_BRIDGE_URL?.trim() || process.env.MT5_TRADEBOT_ROOT_URL?.trim() || DEFAULT_MT5_BRIDGE_ROOT;
   return configured.replace(/\/+$/, '');
@@ -32,6 +33,8 @@ export function getMt5TradebotDiagnostics() {
     rootUrl: bridgeRootUrl(),
     apiBaseUrl: apiBaseUrl(),
     healthEndpoint: `${bridgeRootUrl()}/health`,
+    terminalHealthEndpoint: `${apiBaseUrl()}/terminal/health`,
+    diagnosticsEndpoint: `${apiBaseUrl()}/diagnostics`,
     timeoutMs: TIMEOUT_MS(),
   };
 }
@@ -88,6 +91,55 @@ function sanitizeMt5Payload(body: RequestInit['body']) {
   }
 }
 
+// ── Error extraction ──────────────────────────────────────────────────────────
+
+interface BridgeErrorInfo {
+  code: string;
+  message: string;
+  details?: unknown;
+}
+
+function extractBridgeError(data: unknown): BridgeErrorInfo {
+  if (typeof data !== 'object' || data === null) {
+    return { code: 'UNKNOWN', message: String(data ?? 'Unknown error') };
+  }
+
+  const d = data as Record<string, unknown>;
+
+  // FastAPI raises HTTPException with detail: { success, status, error: { code, message, details } }
+  const detail = d.detail;
+  if (typeof detail === 'object' && detail !== null) {
+    const det = detail as Record<string, unknown>;
+    const err = det.error;
+    if (typeof err === 'object' && err !== null) {
+      const e = err as Record<string, unknown>;
+      return {
+        code: typeof e.code === 'string' ? e.code : 'UNKNOWN',
+        message: typeof e.message === 'string' ? e.message : 'Unknown bridge error',
+        details: e.details,
+      };
+    }
+    // detail is a plain string or a flat object
+    if (typeof det.message === 'string') {
+      return { code: typeof det.code === 'string' ? det.code : 'UNKNOWN', message: det.message, details: det.details };
+    }
+    if (typeof det.error === 'string') {
+      return { code: det.error, message: det.error };
+    }
+    // Fallback: stringify detail safely
+    return { code: 'UNKNOWN', message: JSON.stringify(det) };
+  }
+
+  if (typeof detail === 'string') return { code: 'UNKNOWN', message: detail };
+
+  // Flat error shape: { code, message, ... }
+  if (typeof d.message === 'string') {
+    return { code: typeof d.code === 'string' ? d.code : 'UNKNOWN', message: d.message, details: d.details };
+  }
+
+  return { code: 'UNKNOWN', message: JSON.stringify(d) };
+}
+
 async function tradebotFetch<T>(path: string, options: RequestInit = {}): Promise<{ ok: boolean; status: number; data: T }> {
   const url = path.startsWith('http://') || path.startsWith('https://')
     ? path
@@ -107,24 +159,15 @@ async function tradebotFetch<T>(path: string, options: RequestInit = {}): Promis
     clearTimeout(timer);
     const text = await res.text();
     const contentType = res.headers.get('content-type');
-    const preview = text.slice(0, 500);
-    console.log('[MT5] Response status:', res.status);
-    console.log('[MT5] Response content-type:', contentType ?? 'unknown');
-    console.log('[MT5] Response preview:', preview || '[empty]');
 
     let data: T;
     if (!contentType?.toLowerCase().includes('application/json')) {
-      console.warn('[MT5] JSON parse skipped because response is not JSON');
+      console.warn('[MT5] JSON parse skipped because response is not JSON. status:', res.status, 'url:', url);
       data = {
         success: false,
         error: 'MT5_BRIDGE_UNAVAILABLE',
         message: 'MT5 bridge returned HTML or is not reachable',
-        details: {
-          status: res.status,
-          endpoint: url,
-          contentType,
-          responsePreview: preview,
-        },
+        details: { status: res.status, endpoint: url, contentType },
       } as T;
       return { ok: false, status: res.status, data };
     }
@@ -136,12 +179,7 @@ async function tradebotFetch<T>(path: string, options: RequestInit = {}): Promis
         success: false,
         error: 'MT5_INVALID_JSON',
         message: 'MT5 bridge returned invalid JSON',
-        details: {
-          status: res.status,
-          endpoint: url,
-          contentType,
-          responsePreview: preview,
-        },
+        details: { status: res.status, endpoint: url },
       } as T;
       return { ok: false, status: res.status, data };
     }
@@ -162,32 +200,40 @@ async function tradebotFetch<T>(path: string, options: RequestInit = {}): Promis
 export async function mt5HealthCheck(): Promise<{ healthy: boolean; message: string }> {
   const healthUrl = `${bridgeRootUrl()}/health`;
   try {
-    const res = await tradebotFetch<{ status?: string; message?: string }>(healthUrl);
-    if (res.ok) return { healthy: true, message: res.data.message ?? 'MT5 API is healthy' };
-    return { healthy: false, message: `MT5 API returned ${res.status}. Expected health endpoint: ${healthUrl}` };
+    const res = await tradebotFetch<{ status?: string; ok?: boolean; message?: string }>(healthUrl);
+    if (res.ok) return { healthy: true, message: res.data.message ?? 'MT5 bridge is online' };
+    return { healthy: false, message: `MT5 bridge returned HTTP ${res.status}. URL: ${healthUrl}` };
   } catch (err) {
-    const details = err instanceof Error ? err.message : 'MT5 API unreachable';
+    const details = err instanceof Error ? err.message : 'MT5 bridge unreachable';
     return {
       healthy: false,
-      message: `MT5 TradeBot API is not running. Start it on Windows with: python main.py or python3 backend/main.py. Expected health endpoint: ${healthUrl}. ${details}`,
+      message: `MT5 bridge is not running. Start it with: pm2 restart mt5-bridge. Expected: ${healthUrl}. ${details}`,
     };
+  }
+}
+
+export async function mt5TerminalHealthCheck(): Promise<{ healthy: boolean; code?: string; message: string; details?: unknown }> {
+  const terminalHealthUrl = `${apiBaseUrl()}/terminal/health`;
+  try {
+    const res = await tradebotFetch<{ ok?: boolean; code?: string; message?: string; details?: unknown }>(terminalHealthUrl);
+    if (res.ok && res.data.ok !== false) {
+      return { healthy: true, message: res.data.message ?? 'MT5 terminal is running' };
+    }
+    return {
+      healthy: false,
+      code: res.data.code ?? 'TERMINAL_NOT_RUNNING',
+      message: res.data.message ?? 'MT5 terminal is not running',
+      details: res.data.details,
+    };
+  } catch {
+    // Bridge is online but endpoint doesn't exist yet — degrade gracefully
+    return { healthy: false, code: 'TERMINAL_STATUS_UNKNOWN', message: 'Terminal health endpoint not available on bridge' };
   }
 }
 
 /* ─── Connect ────────────────────────────────────────────────── */
 
 export async function mt5TradebotConnect(creds: MetaTraderCredentials): Promise<MetaTraderConnectResult> {
-  if (creds.passwordType !== 'investor') {
-    return {
-      success: false,
-      status: 'failed',
-      error: {
-        code: 'READ_ONLY_REQUIRED',
-        message: 'Use the investor read-only password. Trading passwords are not accepted by this dashboard.',
-      },
-    };
-  }
-
   // Health check first
   const health = await mt5HealthCheck();
   if (!health.healthy) {
@@ -204,10 +250,11 @@ export async function mt5TradebotConnect(creds: MetaTraderCredentials): Promise<
   const res = await tradebotFetch<{
     success?: boolean;
     message?: string;
-    detail?: string;
+    detail?: unknown;
     error?: string;
     details?: Record<string, unknown>;
     account?: Record<string, unknown>;
+    connectionKey?: string;
   }>('/connect', {
     method: 'POST',
     body: JSON.stringify({
@@ -221,46 +268,35 @@ export async function mt5TradebotConnect(creds: MetaTraderCredentials): Promise<
   });
 
   if (!res.ok) {
-    const msg = String(res.data.detail ?? res.data.message ?? `HTTP ${res.status}`).toLowerCase();
-    const diagnosticDetails = {
-      ...(res.data.details ?? {}),
-      account: creds.login,
-      server: creds.server,
-    };
+    const errInfo = extractBridgeError(res.data);
+    const errCode = errInfo.code;
+    const errMsg = errInfo.message;
+
+    console.error(`[MT5] connect failed. code=${errCode} message=${errMsg}`, errInfo.details ? { details: errInfo.details } : '');
+
     if (res.data.error === 'MT5_BRIDGE_UNAVAILABLE' || res.data.error === 'MT5_INVALID_JSON') {
       return {
         success: false,
         status: 'failed',
-        error: {
-          code: 'CONNECTION_UNAVAILABLE',
-          message: 'MT5 bridge returned HTML or is not reachable',
-          details: diagnosticDetails,
-        },
+        error: { code: 'CONNECTION_UNAVAILABLE', message: 'MT5 bridge returned HTML or is not reachable', details: errInfo },
       };
     }
-    if (msg.includes('password') || msg.includes('invalid')) {
+    if (errCode === 'TERMINAL_NOT_RUNNING') {
+      return { success: false, status: 'failed', error: { code: 'TERMINAL_NOT_RUNNING', message: errMsg, details: errInfo.details } };
+    }
+    if (errCode === 'TERMINAL_NOT_INSTALLED') {
+      return { success: false, status: 'failed', error: { code: 'TERMINAL_NOT_INSTALLED', message: errMsg } };
+    }
+    if (errCode === 'WRONG_PASSWORD' || errMsg.toLowerCase().includes('password') || errMsg.toLowerCase().includes('authorization')) {
       return { success: false, status: 'failed', error: { code: 'WRONG_PASSWORD', message: 'Invalid credentials. Check your login and password.' } };
     }
-    if (msg.includes('server') || msg.includes('not found')) {
+    if (errCode === 'WRONG_SERVER' || errMsg.toLowerCase().includes('server') || errMsg.toLowerCase().includes('not found')) {
       return { success: false, status: 'failed', error: { code: 'WRONG_SERVER', message: 'Broker server not found. Check the server name.' } };
-    }
-    if (msg.includes('terminal path') || msg.includes('installed')) {
-      return { success: false, status: 'failed', error: { code: 'TERMINAL_NOT_INSTALLED', message: 'MetaTrader 5 terminal is not installed or MT5_TERMINAL_PATH is wrong.' } };
-    }
-    if (msg.includes('ipc') || msg.includes('terminal is not running') || msg.includes('cannot be reached')) {
-      return { success: false, status: 'failed', error: { code: 'TERMINAL_NOT_RUNNING', message: 'MetaTrader 5 terminal is not running on the Windows machine.' } };
-    }
-    if (msg.includes('terminal') || msg.includes('initialize')) {
-      return { success: false, status: 'failed', error: { code: 'CONNECTION_UNAVAILABLE', message: 'MetaTrader 5 terminal is unavailable on the Windows machine.' } };
     }
     return {
       success: false,
       status: 'failed',
-      error: {
-        code: 'FAILED_TO_CONNECT',
-        message: String(res.data.detail ?? res.data.message ?? 'Connection failed'),
-        details: diagnosticDetails,
-      },
+      error: { code: (errCode === 'UNKNOWN' ? 'FAILED_TO_CONNECT' : errCode) as MetaTraderErrorPayload['code'], message: errMsg, details: errInfo.details },
     };
   }
 
@@ -433,10 +469,8 @@ export async function mt5PlaceOrder(order: MT5PlaceOrderRequest): Promise<MT5Pla
     body: JSON.stringify(order),
   });
   if (!res.ok) {
-    const msg = (res.data as { message?: string; detail?: string }).detail
-      ?? (res.data as { message?: string }).message
-      ?? `Order rejected (HTTP ${res.status})`;
-    return { success: false, message: String(msg) };
+    const errInfo = extractBridgeError(res.data);
+    return { success: false, message: errInfo.message };
   }
   return res.data;
 }
@@ -444,12 +478,13 @@ export async function mt5PlaceOrder(order: MT5PlaceOrderRequest): Promise<MT5Pla
 /* ─── Close position ─────────────────────────────────────────── */
 
 export async function mt5ClosePosition(positionId: string): Promise<{ success: boolean; message?: string }> {
-  const res = await tradebotFetch<{ success?: boolean; message?: string; detail?: string }>(
+  const res = await tradebotFetch<{ success?: boolean; message?: string; detail?: unknown }>(
     `/position/close/${encodeURIComponent(positionId)}`,
     { method: 'POST' },
   );
   if (!res.ok) {
-    return { success: false, message: String(res.data.detail ?? res.data.message ?? `HTTP ${res.status}`) };
+    const errInfo = extractBridgeError(res.data);
+    return { success: false, message: errInfo.message };
   }
   return { success: true, message: res.data.message };
 }

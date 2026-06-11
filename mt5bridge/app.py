@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Alphamentals MT5 Bridge", version="2.0.0")
 
 # CORS: accept requests from the local Node API only.
-# Port 8001 binds to 127.0.0.1 and is never exposed to the internet.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:3001", "http://localhost:3001"],
@@ -34,7 +33,7 @@ def _check_api_key(x_api_key: str | None, required: bool = True):
 
 
 # ---------------------------------------------------------------------------
-# Liveness / health
+# Liveness — bridge is alive, no MT5 check
 # ---------------------------------------------------------------------------
 
 @app.get("/")
@@ -44,16 +43,17 @@ def root():
 
 @app.get("/health")
 def health(x_api_key: str | None = Header(default=None)):
+    """Bridge liveness only. Returns ok=true whenever the FastAPI process is running.
+    Does NOT check whether MetaTrader 5 terminal is running — use /api/v1/terminal/health for that."""
     _check_api_key(x_api_key, required=False)
-    from .services.metatrader_service import health as mt5_health
-    try:
-        result = mt5_health()
-    except Exception as exc:
-        logger.warning("MT5 health check failed: %s", exc)
-        result = {"healthy": False, "message": str(exc)}
+    from .services.metatrader_service import health as svc_health
+    result = svc_health()
     return {
-        "ok": result.get("healthy", False),
-        "mt5": result,
+        "ok": True,
+        "service": "mt5-bridge",
+        "status": "online",
+        "mt5PackageAvailable": result.get("healthy", False),
+        "terminalPath": result.get("terminalPath"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -148,7 +148,6 @@ _SYMBOL_ALIASES: dict[str, list[str]] = {
 
 
 def _resolve_symbol(mt5: Any, symbol: str) -> str | None:
-    """Try exact match, known aliases, then broker symbol search."""
     if mt5.symbol_info(symbol) is not None:
         mt5.symbol_select(symbol, True)
         return symbol
@@ -302,8 +301,7 @@ def candles(
 
 
 # ---------------------------------------------------------------------------
-# Bulk candles — GET /candles/bulk?symbols=XAUUSD,EURUSD&timeframes=W1,D1,H4&count=300
-# One MT5 initialize for the whole batch — much cheaper than N /candles calls.
+# Bulk candles
 # ---------------------------------------------------------------------------
 
 @app.get("/candles/bulk")
@@ -370,7 +368,7 @@ def candles_bulk(
 
 
 # ---------------------------------------------------------------------------
-# Symbols — GET /symbols
+# Symbols
 # ---------------------------------------------------------------------------
 
 @app.get("/symbols")
@@ -400,7 +398,7 @@ def symbols_route(x_api_key: str | None = Header(default=None)):
 
 
 # ---------------------------------------------------------------------------
-# Connect / disconnect  — POST /connect, POST /disconnect
+# Connect / disconnect
 # ---------------------------------------------------------------------------
 
 @app.post("/connect")
@@ -410,7 +408,12 @@ def connect(payload: dict[str, Any], x_api_key: str | None = Header(default=None
     try:
         return svc_connect(payload)
     except MetaTraderServiceError as exc:
-        raise HTTPException(status_code=400, detail={"ok": False, "error": exc.message, "code": exc.code})
+        raise HTTPException(status_code=400, detail={
+            "ok": False,
+            "success": False,
+            "status": exc.status,
+            "error": {"code": exc.code, "message": exc.message, "details": exc.details},
+        })
 
 
 @app.post("/disconnect")
@@ -421,7 +424,7 @@ def disconnect_route(payload: dict[str, Any] = {}, x_api_key: str | None = Heade
 
 
 # ---------------------------------------------------------------------------
-# Order / close  — POST /order, POST /close  (disabled by default)
+# Order / close
 # ---------------------------------------------------------------------------
 
 @app.post("/order")

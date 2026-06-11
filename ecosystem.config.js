@@ -55,6 +55,11 @@ module.exports = {
       windowsHide: true,
       env: {
         PYTHONUNBUFFERED: '1',
+        // Path to terminal64.exe — used by metatrader_service.py when calling mt5.initialize().
+        // Leave unset to let MT5 auto-detect an already-running terminal.
+        // MT5_TERMINAL_PATH: 'C:\\Program Files\\MetaTrader 5\\terminal64.exe',
+        MT5_TRADING_ENABLED: 'false',
+        // MT5_API_KEY: '',  // same value as MT5_BRIDGE_API_KEY in the Node env above
       },
     },
   ],

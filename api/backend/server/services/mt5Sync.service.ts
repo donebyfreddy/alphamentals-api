@@ -1,9 +1,9 @@
-import { execute } from '../lib/db.js';
+import { execute, db, getDatabaseUrlDiagnostics } from '../lib/db.js';
 import { supabase } from '../lib/supabase.js';
-import { getDatabaseUrlDiagnostics } from '../lib/db.js';
 import type { MetaTraderAccountSnapshot, MetaTraderConnectResult, MetaTraderCredentials } from './metaTrader.service.js';
 import { connectMetaTrader, getBridgeStatus } from './metaTrader.service.js';
 import { createNotification } from './notification.service.js';
+import { decryptPassword, isEncryptionConfigured } from '../lib/credentialEncryption.js';
 import {
   buildTradeAnalysis,
   normalizeClosedTrades,
@@ -59,40 +59,107 @@ const AUTO_SYNC_INTERVAL_MS = Number(process.env.MT5_AUTO_SYNC_INTERVAL_MS ?? 60
 let syncInFlight: Promise<Mt5SyncResult> | null = null;
 let lastSyncError: string | null = null;
 
+// ── No-spam throttle ──────────────────────────────────────────────────────────
+const _spamThrottle = new Map<string, number>();
+const SPAM_INTERVAL_MS = 5 * 60 * 1000;
+let _noAccountsLoggedOnce = false;
+let _dbConfigWarningLoggedOnce = false;
+
+function throttledLog(key: string, level: 'log' | 'warn' | 'error', message: string, ...args: unknown[]) {
+  const now = Date.now();
+  const last = _spamThrottle.get(key) ?? 0;
+  if (now - last < SPAM_INTERVAL_MS) return;
+  _spamThrottle.set(key, now);
+  console[level](message, ...args);
+}
+
 function humanizeMt5SyncError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
 
   if (message.includes("Can't reach database server")) {
     return 'Trade journal database is unavailable. Check your Supabase/DB connection before syncing MT5 trades.';
   }
-
   if (message.toLowerCase().includes('connection timeout')) {
     return 'MT5 connection timed out while fetching account data.';
   }
-
   return message;
 }
 
-function getConfiguredMt5Credentials(): MetaTraderCredentials | null {
-  const login = process.env.MT5_LOGIN?.trim();
-  const password = process.env.MT5_PASSWORD?.trim();
-  const server = process.env.MT5_SERVER?.trim();
+// ── Load syncable accounts from DB ───────────────────────────────────────────
 
-  if (!login || !password || !server) return null;
+interface SyncableAccount {
+  id: string;
+  name: string;
+  mt5_account_number: string | null;
+  mt5_server: string | null;
+  account_type: string;
+  connection_mode: string | null;
+  encrypted_password: Record<string, string> | null;
+  user_id: string | null;
+  auto_journaling_enabled: boolean;
+  trading_enabled: boolean;
+}
 
+async function loadSyncableAccounts(): Promise<SyncableAccount[]> {
+  try {
+    if (db) {
+      const result = await db.query<SyncableAccount>(
+        `SELECT id, name, mt5_account_number, mt5_server, account_type,
+                connection_mode, encrypted_password, user_id,
+                auto_journaling_enabled, trading_enabled
+           FROM trading_accounts
+          WHERE platform = 'MT5'
+            AND status IN ('connected', 'trading_enabled', 'read_only', 'syncing')
+            AND encrypted_password IS NOT NULL`,
+      );
+      return result.rows;
+    }
+    const { data } = await supabase
+      .from('trading_accounts')
+      .select('id, name, mt5_account_number, mt5_server, account_type, connection_mode, encrypted_password, user_id, auto_journaling_enabled, trading_enabled')
+      .eq('platform', 'MT5')
+      .in('status', ['connected', 'trading_enabled', 'read_only', 'syncing'])
+      .not('encrypted_password', 'is', null);
+    return (data ?? []) as SyncableAccount[];
+  } catch (err) {
+    if (!_dbConfigWarningLoggedOnce) {
+      _dbConfigWarningLoggedOnce = true;
+      console.warn('[MT5 Sync] Could not query trading_accounts for sync. Direct DATABASE_URL failed; using Supabase service role fallback.', (err as Error).message);
+    }
+    return [];
+  }
+}
+
+function buildCredentialsFromAccount(account: SyncableAccount, plainPassword: string): MetaTraderCredentials {
+  const connectionMode = account.connection_mode ?? 'read_only';
+  const passwordType: 'master' | 'investor' = connectionMode === 'trading' ? 'master' : 'investor';
   return {
     version: 'mt5',
-    login,
-    password,
-    server,
-    accountType: (process.env.MT5_ACCOUNT_TYPE?.trim() || 'demo') as 'demo' | 'live',
-    passwordType: (process.env.MT5_PASSWORD_TYPE?.trim() || 'investor') as 'master' | 'investor',
+    login: account.mt5_account_number ?? '',
+    password: plainPassword,
+    server: account.mt5_server ?? '',
+    accountType: (account.account_type as 'demo' | 'live') ?? 'demo',
+    passwordType,
+  };
+}
+
+// ── Core sync logic ───────────────────────────────────────────────────────────
+
+function mapAccountRow(row: Record<string, unknown>): LinkedMt5Account {
+  return {
+    id: String(row.id),
+    userId: String(row.userId ?? row.user_id ?? ''),
+    brokerName: String(row.brokerName ?? row.broker_name ?? ''),
+    accountLogin: String(row.accountLogin ?? row.account_login ?? ''),
+    serverName: String(row.serverName ?? row.server_name ?? ''),
+    accountType: String(row.accountType ?? row.account_type ?? ''),
+    status: String(row.status ?? ''),
+    lastSyncedAt: row.lastSyncedAt ? String(row.lastSyncedAt) : row.last_synced_at ? String(row.last_synced_at) : null,
+    createdAt: String(row.createdAt ?? row.created_at ?? ''),
   };
 }
 
 async function ensureTradeImportColumns() {
-  // Guard: silently skip if the trades table doesn't exist yet (first-run / fresh DB).
-  // Columns are created by the migration; this is a safety backfill for pre-migration DBs.
   try {
     await execute(`
       ALTER TABLE trades
@@ -112,30 +179,15 @@ async function ensureTradeImportColumns() {
       WHERE "externalTradeId" IS NOT NULL AND "importSource" IS NOT NULL;
     `);
   } catch (err) {
-    const diagnostics = getDatabaseUrlDiagnostics();
-    console.warn('[MT5 Sync] Could not ensure trade import columns (safe to ignore if table was pre-created by migration):', {
-      code: diagnostics.issueCode ?? 'DATABASE_CONFIG_INVALID',
-      message: err instanceof Error ? err.message : String(err),
-      databaseConfigured: diagnostics.configured,
-      databaseParseable: diagnostics.parseable,
-      hostname: diagnostics.hostname,
-      hint: 'DATABASE_URL should be a valid Supabase PostgreSQL connection string.',
-    });
+    if (!_dbConfigWarningLoggedOnce) {
+      _dbConfigWarningLoggedOnce = true;
+      const diagnostics = getDatabaseUrlDiagnostics();
+      console.warn('[MT5 Sync] Could not ensure trade import columns (safe to ignore if table was pre-created by migration). Direct DATABASE_URL failed; using Supabase service role fallback.', {
+        code: diagnostics.issueCode ?? 'DATABASE_CONFIG_INVALID',
+        hostname: diagnostics.hostname,
+      });
+    }
   }
-}
-
-function mapAccountRow(row: Record<string, unknown>): LinkedMt5Account {
-  return {
-    id: String(row.id),
-    userId: String(row.userId),
-    brokerName: String(row.brokerName),
-    accountLogin: String(row.accountLogin),
-    serverName: String(row.serverName),
-    accountType: String(row.accountType),
-    status: String(row.status),
-    lastSyncedAt: row.lastSyncedAt ? String(row.lastSyncedAt) : null,
-    createdAt: String(row.createdAt),
-  };
 }
 
 async function getOrCreateLinkedAccount(userId: string, account: MetaTraderAccountSnapshot, credentials: MetaTraderCredentials): Promise<LinkedMt5Account> {
@@ -294,8 +346,6 @@ async function upsertJournalTrade(params: {
     lessonsLearned: null,
     mistakeTags: [],
     mentorNotes: `Source=MT5 | Account=${params.account.accountLogin} | Server=${params.account.serverName}`,
-    // Scores are NOT fabricated on import. They stay null until the user
-    // completes a post-trade review, which recomputes them deterministically.
     aiReview: analysis.aiReview,
     aiScore: null,
     setupQuality: null,
@@ -320,9 +370,6 @@ async function upsertJournalTrade(params: {
   };
 
   if (existingQuery.data?.id) {
-    // Re-sync: refresh only market/execution data. Never touch the user's
-    // review fields (scores, emotions, mistakes, narrative, reviewStatus) so a
-    // completed review survives subsequent syncs.
     const marketUpdate = {
       status: payload.status,
       closePrice: payload.closePrice,
@@ -333,7 +380,7 @@ async function upsertJournalTrade(params: {
       exitTime: payload.exitTime,
       durationMinutes: payload.durationMinutes,
     };
-    const { error } = await supabase.from('trades').update(marketUpdate).eq('id', existingQuery.data.id);
+    const { error } = await supabase.from('trades').update(marketUpdate).eq('id', (existingQuery.data as JournalTradeRow).id);
     if (error) throw new Error(error.message);
     return 'updated';
   }
@@ -348,10 +395,7 @@ async function upsertJournalTrade(params: {
 
   const tradeNumber = Number((nextTradeNumber.data as { tradeNumber?: number } | null)?.tradeNumber ?? 0) + 1;
 
-  const { error } = await supabase.from('trades').insert({
-    ...payload,
-    tradeNumber,
-  });
+  const { error } = await supabase.from('trades').insert({ ...payload, tradeNumber });
   if (error) throw new Error(error.message);
   return 'created';
 }
@@ -361,12 +405,7 @@ async function syncJournalTrades(account: LinkedMt5Account, accountSnapshot: Met
   let updated = 0;
 
   for (const trade of openTrades) {
-    const result = await upsertJournalTrade({
-      account,
-      mt5Trade: trade,
-      accountSnapshot,
-      status: 'OPEN',
-    });
+    const result = await upsertJournalTrade({ account, mt5Trade: trade, accountSnapshot, status: 'OPEN' });
     if (result === 'created') created++;
     else updated++;
   }
@@ -393,22 +432,42 @@ function assertSyncReady(result: MetaTraderConnectResult): asserts result is Met
   }
 }
 
-async function performMt5Sync(credentials: MetaTraderCredentials): Promise<Mt5SyncResult> {
-  const userId = DEFAULT_USER_ID;
-  if (!userId) throw new Error('DEFAULT_USER_ID is not configured. Set DEFAULT_USER_ID in your .env file.');
+async function performMt5Sync(credentials: MetaTraderCredentials, effectiveUserId: string): Promise<Mt5SyncResult> {
+  if (!credentials.login || !credentials.server) {
+    return {
+      success: false,
+      accountId: null,
+      accountLogin: credentials.login || null,
+      fetchedOpenPositions: 0,
+      fetchedClosedTrades: 0,
+      journalEntriesCreated: 0,
+      journalEntriesUpdated: 0,
+      recentTradesAvailable: 0,
+      lastSyncTime: null,
+      errors: ['MT5 account login or server is missing. Skipping sync.'],
+    };
+  }
 
   console.log(`[MT5 Sync] Starting sync for account ${credentials.login} on server ${credentials.server}`);
   await ensureTradeImportColumns();
   const result = await connectMetaTrader(credentials);
 
   if (!result.success) {
-    const errMsg = result.error?.message ?? 'Local MT5 bridge connection failed without a specific error message.';
     const errCode = result.error?.code ?? 'UNKNOWN';
-    console.error(`[MT5 Sync] Local bridge connection failed. code=${errCode} message=${errMsg}`);
+    const errMsg = result.error?.message ?? 'MT5 bridge connection failed.';
+    // Structured log — never [object Object]
+    const details = result.error?.details;
+    throttledLog(
+      `mt5-sync-fail-${credentials.login}`,
+      'error',
+      `[MT5 Sync] Local bridge connection failed. code=${errCode} message=${errMsg}`,
+      details ? { details } : undefined,
+    );
     throw new Error(`MT5 sync failed [${errCode}]: ${errMsg}`);
   }
   if (!result.account) throw new Error('MT5 bridge returned success but no account snapshot — unexpected response.');
-  const linkedAccount = await getOrCreateLinkedAccount(userId, result.account, credentials);
+
+  const linkedAccount = await getOrCreateLinkedAccount(effectiveUserId, result.account, credentials);
   const openTrades = normalizeOpenPositions(result.positions ?? []);
   const closedTrades = normalizeClosedTrades(result.history ?? []);
 
@@ -422,8 +481,7 @@ async function performMt5Sync(credentials: MetaTraderCredentials): Promise<Mt5Sy
   ]);
 
   const journal = await syncJournalTrades(linkedAccount, result.account, openTrades, closedTrades);
-  console.log(`[MT5 Sync] Journal entries created: ${journal.created}`);
-  console.log(`[MT5 Sync] Journal entries updated: ${journal.updated}`);
+  console.log(`[MT5 Sync] Journal entries created: ${journal.created}, updated: ${journal.updated}`);
 
   const syncTime = new Date().toISOString();
   const { error: accountUpdateError } = await supabase
@@ -431,12 +489,9 @@ async function performMt5Sync(credentials: MetaTraderCredentials): Promise<Mt5Sy
     .update({ status: 'connected', lastSyncedAt: syncTime })
     .eq('id', linkedAccount.id);
 
-  if (accountUpdateError) {
-    throw new Error(accountUpdateError.message);
-  }
+  if (accountUpdateError) throw new Error(accountUpdateError.message);
 
   const recentTrades = await getRecentTrades(5);
-  console.log(`[MT5 Sync] Recent trades available: ${recentTrades.length}`);
   console.log('[MT5 Sync] Completed successfully');
 
   lastSyncError = null;
@@ -454,9 +509,16 @@ async function performMt5Sync(credentials: MetaTraderCredentials): Promise<Mt5Sy
   };
 }
 
+// ── Public sync API ───────────────────────────────────────────────────────────
+
 export async function syncMt5AccountNow(): Promise<Mt5SyncResult> {
-  const credentials = getConfiguredMt5Credentials();
-  if (!credentials) {
+  const accounts = await loadSyncableAccounts();
+
+  if (accounts.length === 0) {
+    if (!_noAccountsLoggedOnce) {
+      _noAccountsLoggedOnce = true;
+      console.log('[MT5 Sync] No MT5 accounts configured. Add an account from the Accounts page to start syncing.');
+    }
     return {
       success: false,
       accountId: null,
@@ -467,30 +529,99 @@ export async function syncMt5AccountNow(): Promise<Mt5SyncResult> {
       journalEntriesUpdated: 0,
       recentTradesAvailable: 0,
       lastSyncTime: null,
-      errors: ['MT5 account credentials are not configured server-side.'],
+      errors: ['No MT5 accounts configured.'],
     };
   }
 
-  if (syncInFlight) return syncInFlight;
+  // Sync first eligible account (the primary account)
+  const account = accounts[0];
 
-  syncInFlight = performMt5Sync(credentials)
+  if (!account.mt5_account_number || !account.mt5_server) {
+    return {
+      success: false,
+      accountId: account.id,
+      accountLogin: account.mt5_account_number ?? null,
+      fetchedOpenPositions: 0,
+      fetchedClosedTrades: 0,
+      journalEntriesCreated: 0,
+      journalEntriesUpdated: 0,
+      recentTradesAvailable: 0,
+      lastSyncTime: null,
+      errors: ['Account is missing login or server. Skipping.'],
+    };
+  }
+
+  if (!isEncryptionConfigured() || !account.encrypted_password) {
+    throttledLog(`mt5-no-creds-${account.id}`, 'warn', `[MT5 Sync] Account ${account.id} has no stored credentials. Reconnect via the Accounts page.`);
+    return {
+      success: false,
+      accountId: account.id,
+      accountLogin: account.mt5_account_number,
+      fetchedOpenPositions: 0,
+      fetchedClosedTrades: 0,
+      journalEntriesCreated: 0,
+      journalEntriesUpdated: 0,
+      recentTradesAvailable: 0,
+      lastSyncTime: null,
+      errors: ['No stored credentials. Reconnect this account from the Accounts page.'],
+    };
+  }
+
+  let plainPassword: string;
+  try {
+    plainPassword = decryptPassword(account.encrypted_password as { ciphertext: string; iv: string; tag: string; algorithm: string });
+  } catch (err) {
+    throttledLog(`mt5-decrypt-fail-${account.id}`, 'error', `[MT5 Sync] Could not decrypt credentials for account ${account.id}:`, (err as Error).message);
+    return {
+      success: false,
+      accountId: account.id,
+      accountLogin: account.mt5_account_number,
+      fetchedOpenPositions: 0,
+      fetchedClosedTrades: 0,
+      journalEntriesCreated: 0,
+      journalEntriesUpdated: 0,
+      recentTradesAvailable: 0,
+      lastSyncTime: null,
+      errors: ['Credential decryption failed. Reconnect this account from the Accounts page.'],
+    };
+  }
+
+  const credentials = buildCredentialsFromAccount(account, plainPassword);
+  const effectiveUserId = account.user_id ?? DEFAULT_USER_ID;
+  if (!effectiveUserId) {
+    return {
+      success: false,
+      accountId: account.id,
+      accountLogin: account.mt5_account_number,
+      fetchedOpenPositions: 0,
+      fetchedClosedTrades: 0,
+      journalEntriesCreated: 0,
+      journalEntriesUpdated: 0,
+      recentTradesAvailable: 0,
+      lastSyncTime: null,
+      errors: ['DEFAULT_USER_ID is not configured. Set it in .env.'],
+    };
+  }
+
+  if (syncInFlight !== null) return syncInFlight;
+
+  syncInFlight = performMt5Sync(credentials, effectiveUserId)
     .catch((error: unknown) => {
       const message = humanizeMt5SyncError(error);
       lastSyncError = message;
-      // Route the failure through the central notification hub (never blocks/throws).
       void createNotification({
         title: 'MT5 account sync failed',
         message,
         category: 'account_sync',
         severity: 'critical',
         source: 'mt5_sync',
-        metadata: { accountLogin: credentials.login },
+        metadata: { accountLogin: account.mt5_account_number },
         dedupeKey: 'mt5-sync-failure',
       });
       return {
         success: false,
-        accountId: null,
-        accountLogin: credentials.login,
+        accountId: account.id,
+        accountLogin: account.mt5_account_number,
         fetchedOpenPositions: 0,
         fetchedClosedTrades: 0,
         journalEntriesCreated: 0,
@@ -509,14 +640,16 @@ export async function syncMt5AccountNow(): Promise<Mt5SyncResult> {
 
 export async function getMt5Status(): Promise<Mt5StatusResult> {
   await ensureTradeImportColumns();
-  const userId = DEFAULT_USER_ID;
-  const credentials = getConfiguredMt5Credentials();
   const bridge = getBridgeStatus();
-  const { data: accountRow } = userId
+
+  const accounts = await loadSyncableAccounts();
+  const primaryAccount = accounts[0] ?? null;
+
+  const { data: accountRow } = primaryAccount
     ? await supabase
         .from('mt5_connected_accounts')
         .select('*')
-        .eq('userId', userId)
+        .eq('accountLogin', primaryAccount.mt5_account_number)
         .order('createdAt', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -529,20 +662,21 @@ export async function getMt5Status(): Promise<Mt5StatusResult> {
   const closedTrades = account
     ? await supabase.from('mt5_trades').select('id', { count: 'exact', head: true }).eq('accountId', account.id)
     : { count: 0 };
+  const userId = primaryAccount?.user_id ?? DEFAULT_USER_ID;
   const journalTrades = userId
     ? await supabase.from('trades').select('id', { count: 'exact', head: true }).eq('userId', userId).eq('importSource', 'MT5')
     : { count: 0 };
 
   return {
-    apiReachable: bridge.configured && bridge.ready && Boolean(credentials),
+    apiReachable: bridge.configured && bridge.ready,
     linkedAccountExists: Boolean(account),
     lastSyncTime: account?.lastSyncedAt ?? null,
     openTrades: openTrades.count ?? 0,
     closedTradesSynced: closedTrades.count ?? 0,
     journalTradesSynced: journalTrades.count ?? 0,
     lastError: lastSyncError,
-    accountLogin: account?.accountLogin ?? credentials?.login ?? null,
-    serverName: account?.serverName ?? credentials?.server ?? null,
+    accountLogin: account?.accountLogin ?? primaryAccount?.mt5_account_number ?? null,
+    serverName: account?.serverName ?? primaryAccount?.mt5_server ?? null,
   };
 }
 
@@ -581,25 +715,17 @@ export async function getRecentTrades(limit = 5) {
   }));
 }
 
-export function scheduleAutomaticMt5Sync() {
-  const credentials = getConfiguredMt5Credentials();
+// ── Scheduler ─────────────────────────────────────────────────────────────────
 
+export function scheduleAutomaticMt5Sync() {
   if (!DEFAULT_USER_ID) {
     console.warn('[MT5 Sync] DEFAULT_USER_ID not set — automatic MT5 sync disabled.');
     return;
   }
-  if (!credentials) {
-    console.warn('[MT5 Sync] MT5_LOGIN / MT5_PASSWORD / MT5_SERVER not set — automatic MT5 sync disabled.');
-    return;
-  }
 
-  console.log(`[MT5 Sync] Scheduling automatic sync via local Windows VPS MT5 bridge for account ${credentials.login} every ${AUTO_SYNC_INTERVAL_MS / 1000}s.`);
+  console.log(`[MT5 Sync] Scheduler started. Will sync DB-configured MT5 accounts every ${AUTO_SYNC_INTERVAL_MS / 1000}s.`);
+  console.log('[MT5 Sync] Accounts are loaded from the database — not from MT5_LOGIN/MT5_SERVER env vars.');
 
-  setImmediate(() => {
-    void syncMt5AccountNow();
-  });
-
-  setInterval(() => {
-    void syncMt5AccountNow();
-  }, AUTO_SYNC_INTERVAL_MS);
+  setImmediate(() => { void syncMt5AccountNow(); });
+  setInterval(() => { void syncMt5AccountNow(); }, AUTO_SYNC_INTERVAL_MS);
 }

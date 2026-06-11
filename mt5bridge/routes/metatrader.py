@@ -4,6 +4,7 @@ from pydantic import AliasChoices, BaseModel, Field
 from ..services.metatrader_service import (
     MetaTraderServiceError,
     connect,
+    diagnostics,
     disconnect,
     get_account,
     get_historical_data,
@@ -13,6 +14,7 @@ from ..services.metatrader_service import (
     get_tick,
     health,
     sync,
+    terminal_health,
     test_connection,
 )
 
@@ -72,11 +74,28 @@ def mt5_test_connection(payload: MetaTraderConnectRequest | None = None):
 
 @router.get("/api/v1/health")
 def api_v1_health():
+    """Bridge liveness — only checks the FastAPI process + MT5 Python package.
+    Does NOT test whether the MetaTrader 5 terminal is running."""
     result = health()
     status_code = 200 if result.get("healthy") else 503
     if status_code != 200:
         raise HTTPException(status_code=status_code, detail=result)
     return {"status": "ok", **result}
+
+
+@router.get("/api/v1/terminal/health")
+def api_v1_terminal_health():
+    """Deep health check: calls mt5.initialize() to verify the local MT5 terminal responds."""
+    result = terminal_health()
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result)
+    return result
+
+
+@router.get("/api/v1/diagnostics")
+def api_v1_diagnostics():
+    """Full diagnostics: bridge runtime, terminal state, Python env, last error."""
+    return diagnostics()
 
 
 @router.post("/api/v1/connect")

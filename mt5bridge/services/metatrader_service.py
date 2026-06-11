@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -45,24 +46,23 @@ def _map_error(message: str | None) -> str:
 def _user_message(error_code: str) -> str:
     return {
         "INVALID_LOGIN": "The account login number is invalid.",
-        "WRONG_PASSWORD": "The investor password is incorrect.",
+        "WRONG_PASSWORD": "The password is incorrect.",
         "WRONG_SERVER": "The broker/server name is incorrect.",
         "CONNECTION_TIMEOUT": "The MetaTrader connection timed out.",
         "UNSUPPORTED_SERVER": "This broker/server is not supported by the active MetaTrader bridge.",
         "CONNECTION_UNAVAILABLE": "The MT5 connection is currently unavailable.",
         "TERMINAL_NOT_INSTALLED": "MetaTrader 5 terminal is not installed or the configured terminal path is invalid.",
         "TERMINAL_NOT_RUNNING": "MetaTrader 5 terminal is not running or cannot be reached from the Python bridge.",
-        "READ_ONLY_REQUIRED": "This bridge only accepts the investor read-only password.",
     }.get(error_code, "Failed to connect to the MetaTrader account.")
 
 
 def _load_mt5():
     try:
         import MetaTrader5 as mt5  # type: ignore
-    except Exception as exc:  # pragma: no cover - depends on host runtime
+    except Exception as exc:  # pragma: no cover
         raise MetaTraderServiceError(
             "TERMINAL_NOT_INSTALLED",
-            "MetaTrader 5 Python package is unavailable in this runtime. Install the MetaTrader5 package in a supported Windows environment with the MetaTrader 5 terminal.",
+            "MetaTrader 5 Python package is unavailable in this runtime. Install the MetaTrader5 package in a supported Windows environment.",
             status="disconnected",
             details=str(exc),
         ) from exc
@@ -81,9 +81,7 @@ def _connection_key(version: str, server: str, login: str) -> str:
 
 def _terminal_path() -> str | None:
     value = os.getenv("MT5_TERMINAL_PATH", "").strip()
-    if not value:
-        return None
-    return value
+    return value if value else None
 
 
 def _build_connection_kwargs(timeout_ms: int) -> dict[str, Any]:
@@ -131,7 +129,7 @@ def _env_default_credentials() -> dict[str, Any]:
     if not login:
         raise MetaTraderServiceError("INVALID_PAYLOAD", "MT5 login is missing.")
     if not password:
-        raise MetaTraderServiceError("INVALID_PAYLOAD", "MT5 investor password is missing.")
+        raise MetaTraderServiceError("INVALID_PAYLOAD", "MT5 password is missing.")
     if not server:
         raise MetaTraderServiceError("INVALID_PAYLOAD", "MT5 server name is missing.")
 
@@ -151,14 +149,6 @@ def _with_session(credentials: dict[str, Any], callback: Callable[[Any], T], tim
             "UNSUPPORTED_VERSION",
             "This bridge currently supports MT5 only.",
             status="disconnected",
-        )
-
-    password_type = str(credentials.get("passwordType", "investor")).lower()
-    if password_type != "investor":
-        raise MetaTraderServiceError(
-            "READ_ONLY_REQUIRED",
-            "This bridge only accepts the investor read-only password.",
-            details={"passwordType": password_type},
         )
 
     mt5 = _load_mt5()
@@ -254,6 +244,9 @@ def _read_account_bundle(credentials: dict[str, Any], history_days: int = 90, hi
                 }
             )
 
+        trade_allowed = bool(getattr(account_info, "trade_allowed", False))
+        is_investor = not trade_allowed
+
         return {
             "success": True,
             "status": "connected",
@@ -266,8 +259,8 @@ def _read_account_bundle(credentials: dict[str, Any], history_days: int = 90, hi
                 "equity": float(account_info.equity),
                 "currency": account_info.currency,
                 "leverage": int(account_info.leverage),
-                "tradeAllowed": bool(getattr(account_info, "trade_allowed", False)),
-                "isInvestor": True,
+                "tradeAllowed": trade_allowed,
+                "isInvestor": is_investor,
             },
             "positions": position_items,
             "history": history_items,
@@ -319,31 +312,122 @@ def disconnect(connection_key: str):
     return {"success": True, "status": "disconnected"}
 
 
-def health():
+def health() -> dict[str, Any]:
+    """Bridge liveness — only checks that the MetaTrader5 Python package is importable.
+    Does NOT try to connect to the terminal.  Use terminal_health() for that."""
     try:
         _load_mt5()
     except MetaTraderServiceError as error:
         return {"healthy": False, "message": error.message, "code": error.code}
 
+    return {
+        "healthy": True,
+        "message": "MT5 bridge is online. MetaTrader5 Python package is available.",
+        "terminalPath": _terminal_path() or "auto (MT5_TERMINAL_PATH not set)",
+    }
+
+
+def terminal_health() -> dict[str, Any]:
+    """Deep check: tries mt5.initialize() to see if the local terminal responds."""
     try:
         mt5 = _load_mt5()
+    except MetaTraderServiceError as error:
+        return {
+            "ok": False,
+            "code": error.code,
+            "message": error.message,
+            "details": error.details,
+        }
+
+    try:
         initialized = mt5.initialize(**_build_connection_kwargs(5000))
         if not initialized:
             code, message = mt5.last_error()
             error_code = _map_error(message)
             return {
-                "healthy": False,
-                "message": _user_message(error_code),
+                "ok": False,
                 "code": error_code,
+                "message": _user_message(error_code),
                 "details": {"mt5Code": code, "mt5Message": message},
             }
-        mt5.shutdown()
-    except MetaTraderServiceError as error:
-        return {"healthy": False, "message": error.message, "code": error.code, "details": error.details}
-    except Exception as error:
-        return {"healthy": False, "message": str(error), "code": "FAILED_TO_CONNECT"}
 
-    return {"healthy": True, "message": "MT5 bridge is running and the MetaTrader 5 package is available."}
+        try:
+            terminal_info = mt5.terminal_info()
+            return {
+                "ok": True,
+                "code": "TERMINAL_RUNNING",
+                "message": "MetaTrader 5 terminal is running and reachable.",
+                "details": {
+                    "connected": bool(getattr(terminal_info, "connected", False)),
+                    "tradeAllowed": bool(getattr(terminal_info, "trade_allowed", False)),
+                    "path": getattr(terminal_info, "path", None),
+                    "name": getattr(terminal_info, "name", None),
+                },
+            }
+        finally:
+            mt5.shutdown()
+    except MetaTraderServiceError as error:
+        return {"ok": False, "code": error.code, "message": error.message, "details": error.details}
+    except Exception as error:
+        return {"ok": False, "code": "TERMINAL_NOT_RUNNING", "message": str(error)}
+
+
+def diagnostics() -> dict[str, Any]:
+    """Full diagnostics: bridge runtime + terminal state."""
+    terminal_path = _terminal_path()
+    terminal_path_exists = Path(terminal_path).exists() if terminal_path else None
+
+    mt5_module_available = True
+    mt5_last_error: dict[str, Any] | None = None
+    terminal_info_data: dict[str, Any] | None = None
+    initialized = False
+
+    try:
+        mt5 = _load_mt5()
+        mt5_module_available = True
+
+        try:
+            init_result = mt5.initialize(**_build_connection_kwargs(5000))
+            initialized = bool(init_result)
+            if not initialized:
+                code, message = mt5.last_error()
+                mt5_last_error = {"code": code, "message": message}
+            else:
+                ti = mt5.terminal_info()
+                if ti:
+                    terminal_info_data = {
+                        "connected": bool(getattr(ti, "connected", False)),
+                        "tradeAllowed": bool(getattr(ti, "trade_allowed", False)),
+                        "path": getattr(ti, "path", None),
+                        "name": getattr(ti, "name", None),
+                        "company": getattr(ti, "company", None),
+                    }
+                mt5.shutdown()
+        except Exception as exc:
+            mt5_last_error = {"code": "UNKNOWN", "message": str(exc)}
+
+    except MetaTraderServiceError as exc:
+        mt5_module_available = False
+        mt5_last_error = {"code": exc.code, "message": exc.message}
+
+    return {
+        "ok": True,
+        "bridge": {
+            "online": True,
+            "python": sys.executable,
+            "pythonVersion": sys.version,
+            "cwd": os.getcwd(),
+        },
+        "mt5": {
+            "moduleAvailable": mt5_module_available,
+            "terminalPath": terminal_path,
+            "terminalPathConfigured": terminal_path is not None,
+            "terminalPathExists": terminal_path_exists,
+            "initialized": initialized,
+            "lastError": mt5_last_error,
+            "terminalInfo": terminal_info_data,
+        },
+    }
 
 
 def test_connection(credentials: dict[str, Any] | None = None):
@@ -351,7 +435,7 @@ def test_connection(credentials: dict[str, Any] | None = None):
     result = connect(resolved)
     return {
         "success": True,
-        "message": "Successfully connected to MetaTrader 5 with investor read-only access.",
+        "message": "Successfully connected to MetaTrader 5.",
         "connectionKey": result["connectionKey"],
         "account": result["account"],
     }

@@ -1,4 +1,3 @@
-```powershell
 # start.ps1
 # Build the Node API and start/restart both PM2 processes.
 
@@ -208,14 +207,58 @@ $apiOk = Invoke-HealthCheck `
     "Node API    http://localhost:3001/health" `
     "http://localhost:3001/health"
 
+# Bridge liveness — only checks FastAPI process, not MT5 terminal
 $bridgeOk = Invoke-HealthCheck `
     "MT5 Bridge  http://127.0.0.1:8001/health" `
     "http://127.0.0.1:8001/health"
 
+# Terminal health — checks whether MetaTrader 5 is running and reachable
+$terminalOk = $false
 if ($bridgeOk) {
-    Invoke-HealthCheck `
-        "MT5 Status  http://127.0.0.1:8001/status" `
-        "http://127.0.0.1:8001/status" | Out-Null
+    try {
+        $tResp = Invoke-WebRequest `
+            -Uri "http://127.0.0.1:8001/api/v1/terminal/health" `
+            -UseBasicParsing `
+            -TimeoutSec 10 `
+            -ErrorAction Stop
+
+        $tJson = $tResp.Content | ConvertFrom-Json
+
+        if ($tJson.ok -eq $true) {
+            Write-Host "  [OK]   MT5 Terminal http://127.0.0.1:8001/api/v1/terminal/health" -ForegroundColor Green
+            $terminalOk = $true
+        }
+        else {
+            Write-Host "  [WARN] MT5 Bridge is online, but MetaTrader 5 terminal is not reachable." -ForegroundColor Yellow
+            Write-Host "         Code: $($tJson.code)  Message: $($tJson.message)" -ForegroundColor Yellow
+            Write-Host "         Make sure MetaTrader 5 is open on this machine." -ForegroundColor Yellow
+            if ($null -ne $tJson.details) {
+                Write-Host "         Details: $($tJson.details | ConvertTo-Json -Depth 2 -Compress)" -ForegroundColor Yellow
+            }
+        }
+    }
+    catch {
+        Write-Host "  [WARN] MT5 Terminal http://127.0.0.1:8001/api/v1/terminal/health - $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    # Full diagnostics (informational — never fails the startup)
+    try {
+        $diagResp = Invoke-WebRequest `
+            -Uri "http://127.0.0.1:8001/api/v1/diagnostics" `
+            -UseBasicParsing `
+            -TimeoutSec 8 `
+            -ErrorAction Stop
+
+        $diagJson = $diagResp.Content | ConvertFrom-Json
+        $terminalPath = $diagJson.mt5.terminalPath
+        $terminalExists = $diagJson.mt5.terminalPathExists
+
+        if ($null -ne $terminalPath) {
+            $pathStatus = if ($terminalExists -eq $true) { "[EXISTS]" } elseif ($terminalExists -eq $false) { "[NOT FOUND]" } else { "[not configured]" }
+            Write-Host "         Terminal path: $terminalPath $pathStatus" -ForegroundColor Cyan
+        }
+    }
+    catch {}
 }
 
 $eaTicksOk = $false
@@ -303,9 +346,14 @@ if (-not $apiOk) {
 
 if (-not $bridgeOk) {
     Write-Host "  WARNING: MT5 Bridge did not respond." -ForegroundColor Yellow
-    Write-Host "           Ensure MetaTrader 5 is open and logged in." -ForegroundColor Yellow
     Write-Host "           Check logs: pm2 logs mt5-bridge" -ForegroundColor Yellow
     Write-Host "           Verify venv: dir mt5bridge\.venv\Scripts\python.exe" -ForegroundColor Yellow
+}
+
+if ($bridgeOk -and -not $terminalOk) {
+    Write-Host "  WARNING: MT5 Bridge is online, but MetaTrader 5 terminal is not reachable." -ForegroundColor Yellow
+    Write-Host "           Open MetaTrader 5 on this machine, or check MT5_TERMINAL_PATH in .env." -ForegroundColor Yellow
+    Write-Host "           Diagnostics: Invoke-WebRequest http://127.0.0.1:8001/api/v1/diagnostics | ConvertFrom-Json" -ForegroundColor Cyan
 }
 
 if ($apiOk -and -not $eaTicksOk) {
@@ -321,13 +369,15 @@ if ($apiOk -and -not $eaTicksOk) {
     Write-Host "           Make sure http://127.0.0.1:3001 is allowed in MT5 Options -> Expert Advisors." -ForegroundColor Cyan
 }
 
-if ($apiOk -and $bridgeOk -and $eaTicksOk -and $quotePriceOk) {
+if ($apiOk -and $bridgeOk -and $terminalOk -and $eaTicksOk -and $quotePriceOk) {
     Write-Host "=== All services healthy and receiving live prices ===" -ForegroundColor Green
 }
+elseif ($apiOk -and $bridgeOk -and $terminalOk) {
+    Write-Host "=== Services started - MT5 terminal connected, waiting for EA ===" -ForegroundColor Yellow
+}
 elseif ($apiOk -and $bridgeOk) {
-    Write-Host "=== Services started - waiting for MT5 EA to connect ===" -ForegroundColor Yellow
+    Write-Host "=== Bridge online - MetaTrader 5 terminal not detected ===" -ForegroundColor Yellow
 }
 else {
     Write-Host "=== Startup completed with warnings ===" -ForegroundColor Yellow
 }
-```

@@ -46,7 +46,15 @@ Write-Host "  Build output OK." -ForegroundColor Green
 # ── 5. Create .env if missing ─────────────────────────────────────────────────
 Write-Host "`n[5/9] Checking .env file..." -ForegroundColor Yellow
 
-if (-not (Test-Path ".env")) {
+if (Test-Path ".env") {
+    Write-Host "  .env already exists." -ForegroundColor Green
+}
+else {
+    if (-not (Test-Path ".env.example")) {
+        Write-Host "  ERROR: .env.example not found." -ForegroundColor Red
+        exit 1
+    }
+
     Copy-Item ".env.example" ".env"
     Write-Host ""
     Write-Host "  .env created from .env.example." -ForegroundColor Red
@@ -56,8 +64,6 @@ if (-not (Test-Path ".env")) {
     Write-Host "    MT5_BRIDGE_API_KEY=your-secret-key" -ForegroundColor White
     Write-Host ""
     Read-Host "  Press Enter after editing .env to continue"
-} else {
-    Write-Host "  .env already exists." -ForegroundColor Green
 }
 
 # ── 6. Windows Firewall — open port 3001 ─────────────────────────────────────

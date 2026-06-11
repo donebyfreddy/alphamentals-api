@@ -174,7 +174,32 @@ type TelegramBridgeRuntimeState = {
   lastProcessedMessageId: string | null;
 };
 
-const TELEGRAM_BRIDGE_SCRIPT = path.join(process.cwd(), 'scripts', 'telegram_bridge.py');
+// Resolve the Telegram bridge script path. Allow override via env var.
+// Searches common locations so the script can live at scripts/ or project root.
+function resolveBridgeScript(): string {
+  const envPath = process.env.TELEGRAM_PYTHON_SCRIPT?.trim();
+  if (envPath) return envPath;
+  const candidates = [
+    path.join(process.cwd(), 'scripts', 'telegram_bridge.py'),
+    path.join(process.cwd(), 'telegram_bridge.py'),
+    path.join(process.cwd(), 'api', 'scripts', 'telegram_bridge.py'),
+  ];
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { existsSync } = require('node:fs') as typeof import('node:fs');
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  // Return the default path so error messages show a useful expected location.
+  return candidates[0];
+}
+
+const TELEGRAM_BRIDGE_SCRIPT = resolveBridgeScript();
+
+function isBridgeScriptPresent(): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { existsSync } = require('node:fs') as typeof import('node:fs');
+  return existsSync(TELEGRAM_BRIDGE_SCRIPT);
+}
 
 // PythonSpec: cmd = executable, cmdArgs = version args prepended before the script.
 // e.g. { cmd: 'py', cmdArgs: ['-3.11'], label: 'py -3.11' }
@@ -476,6 +501,8 @@ export async function logTelegramStartupDiagnostics() {
     || process.env.PYTHON_EXECUTABLE?.trim()
     || null;
 
+  const scriptPresent = isBridgeScriptPresent();
+
   console.log('[Telegram] Startup config', {
     enabled: config.enabled,
     configured: config.configured,
@@ -487,6 +514,8 @@ export async function logTelegramStartupDiagnostics() {
     sessionName: config.sessionName,
     targetChatConfigured: Boolean(config.targetChat),
     targetChat: config.targetChat,
+    scriptPath: TELEGRAM_BRIDGE_SCRIPT,
+    scriptPresent,
     pythonCandidates: PYTHON_CANDIDATES.map((s) => s.label),
     resolvedPython: resolvedPythonSpec?.label ?? null,
     preferredPython,
@@ -496,6 +525,13 @@ export async function logTelegramStartupDiagnostics() {
     renderUrl: process.env.RENDER_EXTERNAL_URL ?? null,
     sessionPreview: maskSession(config.session),
   });
+
+  if (!scriptPresent) {
+    runtimeState.error = `Telegram bridge script not found: ${TELEGRAM_BRIDGE_SCRIPT}. Telegram sync is disabled. Create the script or set TELEGRAM_PYTHON_SCRIPT env var.`;
+    runtimeState.code = 'SCRIPT_NOT_FOUND';
+    console.warn(`[Telegram] Bridge script not found at ${TELEGRAM_BRIDGE_SCRIPT} — Telegram disabled. Set TELEGRAM_PYTHON_SCRIPT to override the path.`);
+    return;
+  }
 
   try {
     const doctor = await runBridgeCommand<DoctorCommandSuccess>(['doctor', '--json']);
@@ -510,6 +546,8 @@ export async function logTelegramStartupDiagnostics() {
 
 function scheduleMonitorRestart(onMessage: (message: TelegramBridgeMessagePayload) => Promise<void>) {
   if (intentionalMonitorStop || monitorRestartTimer || !runtimeState.configured) return;
+  // Do not restart if the script is permanently missing — avoids an infinite loop.
+  if (runtimeState.code === 'SCRIPT_NOT_FOUND') return;
 
   monitorRestartTimer = setTimeout(() => {
     monitorRestartTimer = null;
@@ -907,6 +945,15 @@ export async function startTelegramMonitoring(onMessage: (message: TelegramBridg
     console.warn(`[Telegram] ${config.error}`);
     return;
   }
+
+  // Hard-stop if the Python bridge script is missing — do NOT schedule restarts.
+  if (!isBridgeScriptPresent()) {
+    runtimeState.error = `Telegram bridge script not found: ${TELEGRAM_BRIDGE_SCRIPT}. Telegram sync disabled. Create the script or set TELEGRAM_PYTHON_SCRIPT env var.`;
+    runtimeState.code = 'SCRIPT_NOT_FOUND';
+    console.warn(`[Telegram] Bridge script not found: ${TELEGRAM_BRIDGE_SCRIPT}. Monitoring will not start.`);
+    return;
+  }
+
   if (monitorProcess) return;
 
   intentionalMonitorStop = false;

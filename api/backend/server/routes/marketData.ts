@@ -12,7 +12,7 @@ import {
   type Mt5Timeframe,
 } from '../services/mt5Candles.service.js';
 
-const MT5_TF_SET: Mt5Timeframe[] = ['W1', 'D1', 'H4', 'H1', 'M15', 'M5'];
+const MT5_TF_SET: Mt5Timeframe[] = ['W1', 'D1', 'H4', 'H1', 'M15'];
 
 /** Map any incoming timeframe form to a supported MT5 timeframe (or null). */
 function toMt5Timeframe(tf: string): Mt5Timeframe | null {
@@ -33,21 +33,28 @@ const SYMBOL_ALIASES: Record<string, string> = {
   OILUSD: 'USOIL',
 };
 
-// Timeframe normalization: frontend short-form → MT5/internal form
+// Timeframe normalization: frontend short-form / display form → MT5/internal form.
+// Handles: 1h / 1H / H1, 4h / 4H / H4, 15m / 15M / M15, 1d / D1, 1w / W1,
+//          Weekly, Daily, and already-canonical MT5 forms.
 const TIMEFRAME_MAP: Record<string, string> = {
-  '1m':    'M1',
-  '5m':    'M5',
-  '15m':   'M15',
-  '30m':   'M30',
-  '1h':    'H1',
-  '4h':    'H4',
-  '1d':    'D1',
-  '1w':    'W1',
-  // Pass-through values already in internal form
+  // Lowercase short-forms (TradingView-style)
+  '1m': 'M1', '5m': 'M5', '15m': 'M15', '30m': 'M30',
+  '1h': 'H1', '4h': 'H4', '1d': 'D1', '1w': 'W1',
+  // Mixed-case display forms (e.g. frontend sends "1H", "4H", "15M", "Weekly")
+  '1H': 'H1', '4H': 'H4', '15M': 'M15', '30M': 'M30',
+  '1D': 'D1', '1W': 'W1',
+  'Weekly': 'W1', 'WEEKLY': 'W1',
+  'Daily': 'D1', 'DAILY': 'D1',
+  // Pass-through canonical MT5 forms
   M1: 'M1', M5: 'M5', M15: 'M15', M30: 'M30',
-  H1: 'H1', H4: 'H4', D1: 'D1', W1: 'W1',
+  H1: 'H1', H4: 'H4', D1: 'D1', W1: 'W1', MN1: 'MN1',
 };
 
+/**
+ * Canonical timeframe normalizer.
+ * Maps any known input form to the MT5 canonical string (H4, H1, M15, D1, W1).
+ * Unknown inputs fall back to the uppercase form.
+ */
 export function normalizeTimeframe(tf: string): string {
   return TIMEFRAME_MAP[tf] ?? TIMEFRAME_MAP[tf.toUpperCase()] ?? tf.toUpperCase();
 }
@@ -170,7 +177,7 @@ marketDataRouter.get('/candles', async (req, res) => {
     if (!mt5Tf) {
       return res.status(400).json({
         ok: false, error: 'INVALID_TIMEFRAME', symbol, timeframe,
-        message: `Timeframe '${rawTimeframe}' is not supported. Use one of ${MT5_TF_SET.join(', ')}.`,
+        message: `Timeframe '${rawTimeframe}' is not supported. Supported: ${MT5_TF_SET.join(', ')}. Also accepted: W1, D1, H4, H1, M15, 1w, 1d, 4h, 1h, 15m and their equivalents.`,
       });
     }
 
@@ -207,13 +214,13 @@ marketDataRouter.get('/candles', async (req, res) => {
 marketDataRouter.get('/candles/bulk', async (req, res) => {
   try {
     const symbols = String(req.query.symbols ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-    const tfRaw = String(req.query.timeframes ?? 'W1,D1,H4,H1,M15,M5').split(',').map((s) => s.trim()).filter(Boolean);
+    const tfRaw = String(req.query.timeframes ?? 'W1,D1,H4,H1,M15').split(',').map((s) => s.trim()).filter(Boolean);
     const count = req.query.count ? Math.min(Number(req.query.count), 5000) : 300;
 
     if (!symbols.length) return res.status(400).json({ ok: false, error: 'symbols param required' });
 
     const timeframes = tfRaw.map(toMt5Timeframe).filter((t): t is Mt5Timeframe => t !== null);
-    if (!timeframes.length) return res.status(400).json({ ok: false, error: 'INVALID_TIMEFRAME', message: `Use timeframes from ${MT5_TF_SET.join(', ')}` });
+    if (!timeframes.length) return res.status(400).json({ ok: false, error: 'INVALID_TIMEFRAME', message: `Supported timeframes: ${MT5_TF_SET.join(', ')}` });
 
     const data: Record<string, unknown> = {};
     for (const sym of symbols) {

@@ -9,6 +9,7 @@ import { getActiveProviders } from '../lib/calendarProviders/index.js';
 import { buildPairFundamentalAnalysis, type PairFundamentalAnalysis } from '../services/pairFundamentalsAi.service.js';
 import { buildPairIntelligence } from '../services/pairIntelligence.service.js';
 import { loadPairIntelligence } from '../services/pairIntelligencePersistence.service.js';
+import { getMt5BridgeStatus } from '../services/mt5Candles.service.js';
 
 export const marketIntelligenceRouter = Router();
 
@@ -378,29 +379,56 @@ marketIntelligenceRouter.get('/diagnostics', async (_req, res) => {
     const openaiKey = getConfiguredOpenAIApiKey();
     const persistence = await getPersistenceStatus();
     const calendarProviders = getActiveProviders();
+    const mt5Bridge = await getMt5BridgeStatus();
 
     const activeSources = overview.sourceStatus.filter((s) => s.status === 'ok').length;
     const failedSources = overview.sourceStatus.filter((s) => s.status === 'failed').length;
 
-    const myfxbookConfigured = Boolean(process.env.MYFXBOOK_EMAIL && process.env.MYFXBOOK_PASSWORD);
+    const myfxbookEmail = process.env.MYFXBOOK_EMAIL?.trim();
+    const myfxbookPassword = process.env.MYFXBOOK_PASSWORD?.trim();
+    const myfxbookConfigured = Boolean(myfxbookEmail && myfxbookPassword);
     const myfxbookProvider = calendarProviders.find((p) => p.name === 'myfxbook');
+
+    const openaiConfigured = Boolean(openaiKey);
 
     res.json({
       ok: true,
       backend: {
-        time: new Date().toISOString(),
+        port: Number(process.env.PORT ?? 3001),
         env: process.env.NODE_ENV ?? 'development',
         timezone: 'Europe/Madrid',
+        time: new Date().toISOString(),
+      },
+      mt5: {
+        bridgeUrl: mt5Bridge.bridgeUrl,
+        bridgeReachable: mt5Bridge.bridgeReachable,
+        terminalConnected: mt5Bridge.terminalConnected,
+        accountLogin: mt5Bridge.accountLogin,
+        server: mt5Bridge.server,
+        lastCheckAt: mt5Bridge.lastCheckAt,
+        error: mt5Bridge.error,
       },
       openai: {
-        configured: Boolean(openaiKey),
+        configured: openaiConfigured,
+        valid: openaiConfigured,
         model: getOpenAIModel(),
+        lastError: openaiConfigured ? null : 'OPENAI_API_KEY is missing or empty',
       },
       myfxbook: {
         configured: myfxbookConfigured,
-        available: myfxbookProvider?.available ?? false,
-        calendarAvailable: myfxbookProvider?.available ?? false,
-        lastError: myfxbookConfigured ? null : 'MYFXBOOK_EMAIL and MYFXBOOK_PASSWORD not set',
+        authenticated: myfxbookProvider?.available ?? false,
+        lastError: myfxbookConfigured ? null : 'MYFXBOOK_EMAIL and MYFXBOOK_PASSWORD are missing',
+      },
+      telegram: {
+        available: telegram.connected,
+        configured: telegram.configured,
+        phase: telegram.currentPhase ?? telegram.errorPhase ?? 'TELEGRAM_UNAVAILABLE',
+        account: telegram.accountUsername ?? null,
+        targetChat: telegram.targetChat,
+        resolvedChat: telegram.targetChatTitle,
+        lastError: telegram.error,
+        code: telegram.code,
+        hints: telegram.hints,
       },
       sources: {
         active: activeSources,
@@ -426,17 +454,7 @@ marketIntelligenceRouter.get('/diagnostics', async (_req, res) => {
           : null,
         status: jobStatus.status,
         triggerSource: overview.scheduleMetadata.triggeredBy,
-      },
-      telegram: {
-        available: telegram.connected,
-        configured: telegram.configured,
-        phase: telegram.currentPhase ?? telegram.errorPhase ?? 'TELEGRAM_UNAVAILABLE',
-        account: telegram.accountUsername ?? 'Unknown',
-        targetChat: telegram.targetChat,
-        resolvedChat: telegram.targetChatTitle,
-        lastError: telegram.error,
-        code: telegram.code,
-        hints: telegram.hints,
+        timezone: 'Europe/Madrid',
       },
       persistence: {
         hasAnalysis: persistence.hasAnalysis,

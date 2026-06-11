@@ -136,7 +136,7 @@ function buildSetupDecision(
       confidence: 0,
       grade: 'D',
       reason: 'No MT5 candle data available — technical confirmation is impossible. Open the charts in MT5 on the VPS.',
-      whatMustHappenNext: ['Start the MT5 Python bridge', 'Open W1/D1/H4/H1/M15/M5 charts in MT5 to download history'],
+      whatMustHappenNext: ['Start the MT5 Python bridge', 'Open W1/D1/H4/H1/M15 charts in MT5 to download history'],
       invalidation: null,
     };
   }

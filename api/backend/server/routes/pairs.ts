@@ -17,7 +17,7 @@ import { refreshFundamentalsData } from '../services/fundamentals.service.js';
 
 export const pairsRouter = Router();
 
-const VALID_TIMEFRAMES: Mt5Timeframe[] = ['W1', 'D1', 'H4', 'H1', 'M15', 'M5'];
+const VALID_TIMEFRAMES: Mt5Timeframe[] = ['W1', 'D1', 'H4', 'H1', 'M15'];
 
 function parseTimeframe(raw: unknown): Mt5Timeframe | null {
   const tf = String(raw ?? '').toUpperCase() as Mt5Timeframe;

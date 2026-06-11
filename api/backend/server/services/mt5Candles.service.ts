@@ -14,7 +14,7 @@
 
 import * as cache from '../lib/cache.js';
 
-export type Mt5Timeframe = 'W1' | 'D1' | 'H4' | 'H1' | 'M15' | 'M5';
+export type Mt5Timeframe = 'W1' | 'D1' | 'H4' | 'H1' | 'M15';
 
 export interface Mt5Candle {
   time: string; // ISO-8601 UTC
@@ -55,13 +55,11 @@ export const REQUIRED_CANDLES: Record<Mt5Timeframe, number> = {
   H4: 200,
   H1: 300,
   M15: 300,
-  M5: 300,
 };
 
-export const ALL_TIMEFRAMES: Mt5Timeframe[] = ['W1', 'D1', 'H4', 'H1', 'M15', 'M5'];
+export const ALL_TIMEFRAMES: Mt5Timeframe[] = ['W1', 'D1', 'H4', 'H1', 'M15'];
 
 const CACHE_TTL_MS: Record<Mt5Timeframe, number> = {
-  M5: 30_000,
   M15: 30_000,
   H1: 120_000,
   H4: 120_000,
@@ -187,11 +185,12 @@ export async function getMt5Candles(
     if (cached) return cached;
   }
 
+  const candlesPath = `/candles?symbol=${encodeURIComponent(compact)}&timeframe=${timeframe}&count=${count}`;
+  console.log(`[mt5-candles] symbol=${compact} tf=${timeframe} count=${count} url=${bridgeBaseUrl()}${candlesPath}`);
+
   let result: TimeframeCandleResult;
   try {
-    const payload = await bridgeGet<BridgeCandlesResponse>(
-      `/candles?symbol=${encodeURIComponent(compact)}&timeframe=${timeframe}&count=${count}`,
-    );
+    const payload = await bridgeGet<BridgeCandlesResponse>(candlesPath);
     result = toResult(timeframe, payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -208,7 +207,7 @@ export async function getMt5Candles(
   // Cache only successful/insufficient results; failed bridge calls get a short negative cache
   const ttl = result.status === 'error' ? 10_000 : CACHE_TTL_MS[timeframe];
   cache.set(cacheKey, result, ttl);
-  console.log(`[mt5-candles] ${compact} ${timeframe}: status=${result.status} available=${result.available}/${result.required}`);
+  console.log(`[mt5-candles] done symbol=${compact} tf=${timeframe} status=${result.status} available=${result.available}/${result.required} resolvedSymbol=${result.resolvedSymbol ?? 'n/a'}`);
   return result;
 }
 
@@ -220,7 +219,7 @@ export async function getMt5CandleBundle(
 ): Promise<SymbolCandleBundle> {
   const compact = compactSymbol(symbol);
   const timeframes = options?.timeframes ?? ALL_TIMEFRAMES;
-  const count = options?.count ?? 320;
+  const count = options?.count ?? 300;
   const cacheKey = `mt5:bundle:${compact}:${timeframes.join('-')}:${count}`;
 
   if (!options?.forceRefresh) {

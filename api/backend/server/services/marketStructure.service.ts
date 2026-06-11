@@ -58,12 +58,12 @@ export interface MarketStructureResult {
 
 // Higher-timeframe fractal needs a wider window than lower TFs.
 const FRACTAL_WINDOW: Record<Mt5Timeframe, number> = {
-  W1: 2, D1: 2, H4: 3, H1: 3, M15: 3, M5: 3,
+  W1: 2, D1: 2, H4: 3, H1: 3, M15: 3,
 };
 
 // Multi-timeframe alignment weights (HTF carries more weight).
 const TF_WEIGHT: Record<Mt5Timeframe, number> = {
-  W1: 6, D1: 5, H4: 4, H1: 3, M15: 2, M5: 1,
+  W1: 6, D1: 5, H4: 4, H1: 3, M15: 2,
 };
 
 function computeATR(candles: Mt5Candle[], period = 14): number | null {
@@ -234,7 +234,7 @@ function buildExplanation(
   strength: number,
   rangePct: number | null,
 ): string {
-  const tfName = { W1: 'Weekly', D1: 'Daily', H4: '4H', H1: '1H', M15: '15M', M5: '5M' }[tf];
+  const tfName = { W1: 'Weekly', D1: 'Daily', H4: '4H', H1: '1H', M15: '15M' }[tf];
   if (trend === 'bullish') {
     return `${tfName}: higher highs and higher lows with a ${label}. Trend strength ${strength}/100${strength >= 55 ? ' — momentum is constructive.' : ' — momentum is modest, watch for a pullback.'}`;
   }
@@ -356,7 +356,7 @@ export function buildMarketStructure(
   else overallDirection = 'mixed';
 
   const htf = usable.filter((tf) => ['W1', 'D1', 'H4'].includes(tf.timeframe));
-  const ltf = usable.filter((tf) => ['H1', 'M15', 'M5'].includes(tf.timeframe));
+  const ltf = usable.filter((tf) => ['H1', 'M15'].includes(tf.timeframe));
   const htfDir = htf.map((t) => t.direction).join('/') || 'n/a';
   const ltfDir = ltf.map((t) => t.direction).join('/') || 'n/a';
 

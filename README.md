@@ -40,6 +40,7 @@ The EA posts heartbeats to `http://127.0.0.1:3001/ea/heartbeat` and tick data to
 git clone <repo-url> C:\alphamentals-api
 cd C:\alphamentals-api
 npm install
+npx playwright install chromium
 ```
 
 ### 3. Configure environment
@@ -56,9 +57,30 @@ NODE_ENV=production
 HOST=0.0.0.0
 PORT=3001
 CORS_ORIGINS=https://alphamentals-dashboard.pages.dev,https://alphamentals-dashboard.vercel.app,http://localhost:3000
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+MYFXBOOK_EMAIL=
+MYFXBOOK_PASSWORD=
+MYFXBOOK_ENABLED=true
+SCRAPING_ENABLED=true
+PLAYWRIGHT_HEADLESS=true
+NEWS_ENABLED=true
+FUNDAMENTALS_ENABLED=true
+CACHE_TTL_MINUTES=15
+NEWS_CACHE_TTL_MINUTES=10
+CALENDAR_CACHE_TTL_MINUTES=15
+FUNDAMENTALS_CACHE_TTL_MINUTES=30
+TIMEZONE=Europe/Madrid
 ```
 
 ### 4. Build and start
+
+```powershell
+npm run build
+npm start
+```
+
+Or with the helper script:
 
 ```powershell
 .\start.ps1
@@ -70,6 +92,11 @@ This builds the TypeScript API and starts `alphamentals-api` via PM2.
 
 ```powershell
 curl.exe http://localhost:3001/health
+curl.exe http://localhost:3001/api/health
+curl.exe http://localhost:3001/api/sources/status
+curl.exe http://localhost:3001/api/economic-calendar
+curl.exe http://localhost:3001/api/news
+curl.exe http://localhost:3001/api/fundamentals
 curl.exe http://localhost:3001/ea/status
 curl.exe "http://localhost:3001/api/mt5/status"
 curl.exe "http://localhost:3001/api/market-data/quotes?symbols=XAUUSD,EURUSD"
@@ -105,6 +132,29 @@ Or via npm scripts:
 ```powershell
 npm run pm2:start
 npm run pm2:restart
+npm run pm2:logs
+```
+
+## Market intelligence backend
+
+Extra packages used by calendar/news/fundamentals:
+
+```powershell
+npm install playwright rss-parser zod node-cron dotenv
+npx playwright install chromium
+```
+
+Manual refresh and status:
+
+```powershell
+curl.exe -X POST http://localhost:3001/api/refresh
+curl.exe http://localhost:3001/api/sources/status
+```
+
+Logs:
+
+```powershell
+pm2 logs alphamentals-api
 npm run pm2:logs
 ```
 
@@ -160,6 +210,10 @@ npm run pm2:logs
 | `GET /api/analytics/...` | Analytics |
 | `GET /api/accounts` | Trading accounts |
 | `GET /api/economic-calendar` | Economic calendar |
+| `GET /api/news` | Normalized news feed |
+| `GET /api/fundamentals` | AI fundamental analysis |
+| `GET /api/sources/status` | Real source health |
+| `POST /api/refresh` | Force refresh calendar/news/fundamentals |
 
 ### Symbol formats accepted
 
@@ -195,6 +249,7 @@ All `/api/*` requests from the dashboard go directly to this server.
 
 ```powershell
 npm run dev:api      # run with tsx watch (hot-reload)
+npm run build        # compile TypeScript -> dist-api/
 npm run build:api    # compile TypeScript -> dist-api/
 npm start            # run compiled output
 ```

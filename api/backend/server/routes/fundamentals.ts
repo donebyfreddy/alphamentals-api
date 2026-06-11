@@ -11,6 +11,7 @@ import {
   refreshFundamentalsData,
 } from '../services/fundamentals.service.js';
 import { canRunScheduledAiAnalysis, getLatestAiAnalysisForSymbolResponse, runAiAnalysis } from '../services/aiAnalysisRuns.service.js';
+import { getCalendarPayload, getFundamentalsPayload, getNewsPayload } from '../services/marketIntelligence/marketIntelligenceHub.service.js';
 
 function isAuthorizedCron(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
@@ -25,10 +26,36 @@ export const fundamentalsRouter = Router();
 fundamentalsRouter.get('/', async (_req, res) => {
   try {
     await bootstrapFundamentals();
-    res.json(getFundamentalsOverview());
+    const [overview, fundamentals, news, calendar] = await Promise.all([
+      Promise.resolve(getFundamentalsOverview()),
+      getFundamentalsPayload(),
+      getNewsPayload(),
+      getCalendarPayload(),
+    ]);
+    res.json({
+      ...fundamentals,
+      ok: true,
+      pairs: overview.pairs,
+      latestNews: news.articles,
+      upcomingEvents: calendar.events,
+      highImpactNext4Hours: calendar.events.filter((event) => event.impact === 'high').slice(0, 10),
+      sourceStatus: fundamentals.sources,
+      lastUpdated: fundamentals.generatedAt,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load fundamentals overview';
-    res.status(500).json({ error: message, detail: 'The fundamentals engine could not build the default overview.' });
+    res.json({
+      analysis: [],
+      globalMacro: {
+        usdBias: 'neutral',
+        riskSentiment: 'mixed',
+        goldBias: 'neutral',
+      },
+      sources: [],
+      generatedAt: new Date().toISOString(),
+      error: message,
+      detail: 'The fundamentals engine could not build the default overview.',
+    });
   }
 });
 
@@ -69,31 +96,29 @@ fundamentalsRouter.post('/refresh', async (req, res) => {
 
 fundamentalsRouter.get('/news', async (_req, res) => {
   try {
-    await bootstrapFundamentals();
-    res.json({ items: getFundamentalsNews() });
+    res.json(await getNewsPayload());
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load fundamentals news';
-    res.status(500).json({ error: message });
+    res.json({ articles: [], sources: [], generatedAt: new Date().toISOString(), error: message });
   }
 });
 
 fundamentalsRouter.get('/events', async (_req, res) => {
   try {
-    await bootstrapFundamentals();
-    res.json({ items: getFundamentalsEvents() });
+    res.json(await getCalendarPayload());
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load fundamentals events';
-    res.status(500).json({ error: message });
+    res.json({ events: [], sources: [], generatedAt: new Date().toISOString(), error: message });
   }
 });
 
 fundamentalsRouter.get('/sources/status', async (_req, res) => {
   try {
-    await bootstrapFundamentals();
-    res.json({ items: getFundamentalSourceStatus() });
+    const payload = await getFundamentalsPayload();
+    res.json({ sources: payload.sources, items: getFundamentalSourceStatus() });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load fundamentals source status';
-    res.status(500).json({ error: message });
+    res.json({ sources: [], error: message });
   }
 });
 

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { fetchCalendarFromProviders, getActiveProviders } from '../lib/calendarProviders/index.js';
 import { generateCalendarRec, generateDaySummary } from '../lib/claude.js';
+import { getCalendarPayload } from '../services/marketIntelligence/marketIntelligenceHub.service.js';
 
 export const economicCalendarRouter = Router();
 
@@ -14,15 +15,33 @@ economicCalendarRouter.get('/', async (req, res) => {
   try {
     const now = new Date();
     const from = (req.query.from as string) ?? fmt(new Date(now.getTime() - 2 * 86400000));
-    const to   = (req.query.to   as string) ?? fmt(new Date(now.getTime() + 7 * 86400000));
+    const to = (req.query.to as string) ?? fmt(new Date(now.getTime() + 7 * 86400000));
+    const [normalized, legacy] = await Promise.all([
+      getCalendarPayload(),
+      fetchCalendarFromProviders(from, to).catch(() => []),
+    ]);
 
-    const events = await fetchCalendarFromProviders(from, to);
-    const data = Array.isArray(events) ? events : (events as any)?.data ?? [];
-    res.json({ ok: true, data });
+    res.json({
+      ok: true,
+      events: normalized.events,
+      sources: normalized.sources.filter((source) => source.category === 'calendar'),
+      generatedAt: normalized.generatedAt,
+      data: legacy,
+      items: normalized.events,
+    });
   } catch (err) {
     console.error('[economic-calendar]', err);
     const message = err instanceof Error ? err.message : 'Economic calendar unavailable';
-    res.json({ ok: false, error: 'ECONOMIC_CALENDAR_UNAVAILABLE', message });
+    res.json({
+      ok: true,
+      events: [],
+      sources: [],
+      generatedAt: new Date().toISOString(),
+      data: [],
+      items: [],
+      error: 'ECONOMIC_CALENDAR_UNAVAILABLE',
+      message,
+    });
   }
 });
 

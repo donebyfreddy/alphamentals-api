@@ -174,26 +174,44 @@ type TelegramBridgeRuntimeState = {
   lastProcessedMessageId: string | null;
 };
 
+type BridgeScriptResolution = { scriptPath: string; checkedPaths: string[] };
+
 // Resolve the Telegram bridge script path. Allow override via env var.
-// Searches common locations so the script can live at scripts/ or project root.
-function resolveBridgeScript(): string {
-  const envPath = process.env.TELEGRAM_PYTHON_SCRIPT?.trim();
-  if (envPath) return envPath;
+// TELEGRAM_BRIDGE_SCRIPT_PATH and TELEGRAM_PYTHON_SCRIPT are both accepted.
+// Searches common locations across various project structures.
+function resolveBridgeScript(): BridgeScriptResolution {
+  const envPath = (process.env.TELEGRAM_BRIDGE_SCRIPT_PATH?.trim() || process.env.TELEGRAM_PYTHON_SCRIPT?.trim()) || null;
+  if (envPath) {
+    console.log(`[telegram] resolving bridge script from env: ${envPath}`);
+    return { scriptPath: envPath, checkedPaths: [envPath] };
+  }
   const candidates = [
+    path.join(process.cwd(), 'backend', 'scripts', 'telegram_bridge.py'),
+    path.join(process.cwd(), 'backend', 'server', 'scripts', 'telegram_bridge.py'),
+    path.join(process.cwd(), 'backend', 'services', 'telegram_bridge.py'),
+    path.join(process.cwd(), 'backend', 'telegram_bridge.py'),
     path.join(process.cwd(), 'scripts', 'telegram_bridge.py'),
-    path.join(process.cwd(), 'telegram_bridge.py'),
     path.join(process.cwd(), 'api', 'scripts', 'telegram_bridge.py'),
+    path.join(process.cwd(), 'telegram_bridge.py'),
   ];
+  console.log('[telegram] resolving bridge script');
+  console.log('[telegram] checked script paths:', candidates.join(', '));
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { existsSync } = require('node:fs') as typeof import('node:fs');
   for (const p of candidates) {
-    if (existsSync(p)) return p;
+    if (existsSync(p)) {
+      console.log(`[telegram] selected script: ${p}`);
+      return { scriptPath: p, checkedPaths: candidates };
+    }
   }
-  // Return the default path so error messages show a useful expected location.
-  return candidates[0];
+  console.warn('[telegram] bridge script not found. Checked:', candidates.join(', '));
+  // Return default path so error messages show an expected location; checkedPaths surfaces all tried locations.
+  return { scriptPath: candidates[4], checkedPaths: candidates };
 }
 
-const TELEGRAM_BRIDGE_SCRIPT = resolveBridgeScript();
+const _bridgeScriptResolution = resolveBridgeScript();
+const TELEGRAM_BRIDGE_SCRIPT = _bridgeScriptResolution.scriptPath;
+const TELEGRAM_CHECKED_SCRIPT_PATHS = _bridgeScriptResolution.checkedPaths;
 
 function isBridgeScriptPresent(): boolean {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -233,6 +251,13 @@ function buildPythonCandidates(): PythonSpec[] {
     .filter((p) => { try { return existsSync(p); } catch { return false; } })
     .map((p) => ({ cmd: p, cmdArgs: [], label: `venv:${path.basename(p)}` }));
 
+  // Known Windows system Python installations — only include if the exe exists.
+  const windowsPaths: PythonSpec[] = [
+    String.raw`C:\Users\Administrator\AppData\Local\Programs\Python\Python311\python.exe`,
+  ]
+    .filter((p) => { try { return existsSync(p); } catch { return false; } })
+    .map((p) => ({ cmd: p, cmdArgs: [], label: 'win:python311' }));
+
   const standard: PythonSpec[] = [
     // py -3.11: spawn('py', ['-3.11', script, ...args]) — Windows version-specific launcher
     { cmd: 'py', cmdArgs: ['-3.11'], label: 'py -3.11' },
@@ -241,8 +266,8 @@ function buildPythonCandidates(): PythonSpec[] {
     { cmd: 'python', cmdArgs: [], label: 'python' },
   ];
 
-  const all = [...explicit, ...venvPaths, ...standard];
-  console.log('[Telegram] Python candidates:', all.map((s) => s.label).join(', '));
+  const all = [...explicit, ...venvPaths, ...windowsPaths, ...standard];
+  console.log('[telegram] Python candidates:', all.map((s) => s.label).join(', '));
   return all;
 }
 
@@ -393,6 +418,15 @@ async function tryRunPythonCommand(spec: PythonSpec, args: string[], timeoutMs: 
 }
 
 async function runBridgeCommand<T>(args: string[], timeoutMs = 30_000): Promise<T> {
+  if (!isBridgeScriptPresent()) {
+    throw new TelegramBridgeError(
+      'SCRIPT_NOT_FOUND',
+      `Telegram bridge script not found. Checked: ${TELEGRAM_CHECKED_SCRIPT_PATHS.join(', ')}`,
+      null,
+      { phase: 'TELEGRAM_SCRIPT_NOT_FOUND' },
+    );
+  }
+
   const specs = resolvedPythonSpec ? [resolvedPythonSpec] : PYTHON_CANDIDATES;
   let lastError: unknown = null;
 
@@ -763,6 +797,35 @@ function spawnMonitorProcess(spec: PythonSpec, handlers: MonitorHandlers) {
 export function getTelegramRuntimeState() {
   updateBaseState();
   return { ...runtimeState };
+}
+
+export function getTelegramScriptDiagnostics() {
+  const scriptPresent = isBridgeScriptPresent();
+  const config = getTelegramEnvConfig();
+
+  let phase: string;
+  if (config.enabled && scriptPresent) {
+    phase = runtimeState.currentPhase ?? runtimeState.errorPhase ?? 'TELEGRAM_UNAVAILABLE';
+  } else if (config.enabled) {
+    phase = 'TELEGRAM_SCRIPT_NOT_FOUND';
+  } else {
+    phase = 'TELEGRAM_NOT_CONFIGURED';
+  }
+
+  console.log(`[telegram] selected python: ${resolvedPythonSpec?.label ?? 'none'}`);
+  console.log(`[telegram] target chat: ${config.targetChat ?? 'not set'}`);
+
+  return {
+    configured: runtimeState.configured,
+    available: runtimeState.connected,
+    phase,
+    selectedPython: resolvedPythonSpec?.label ?? null,
+    selectedScript: scriptPresent ? TELEGRAM_BRIDGE_SCRIPT : null,
+    checkedScriptPaths: TELEGRAM_CHECKED_SCRIPT_PATHS,
+    targetChat: config.targetChat ?? null,
+    resolvedChat: runtimeState.targetChatTitle ?? null,
+    lastError: scriptPresent ? runtimeState.error : `Telegram bridge script not found. Checked: ${TELEGRAM_CHECKED_SCRIPT_PATHS.join(', ')}`,
+  };
 }
 
 export async function testTelegramConnection(): Promise<TelegramConnectionTestResult> {

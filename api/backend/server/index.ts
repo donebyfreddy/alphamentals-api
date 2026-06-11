@@ -47,6 +47,14 @@ import { pairAiRouter } from './routes/pairAi.js';
 import { startMarketDataScheduler, validateMarketDataEnv } from '../../src/server/marketDataService.js';
 import { getBridgeConfigDiagnostics } from '../../src/server/mt5BridgeQuotes.js';
 import { logOpenAIConfiguration } from './lib/openaiConfig.js';
+import {
+  bootstrapMarketIntelligence,
+  getFundamentalsPayload as getUnifiedFundamentalsPayload,
+  getHealthPayload as getUnifiedHealthPayload,
+  getNewsPayload as getUnifiedNewsPayload,
+  getSourcesStatusPayload,
+  refreshMarketIntelligence,
+} from './services/marketIntelligence/marketIntelligenceHub.service.js';
 
 dotenv.config();
 
@@ -146,10 +154,19 @@ app.use('/api/ai-analysis', aiAnalysisRouter);
 app.use('/api/pair-ai', pairAiRouter);
 app.use('/api/cost', costRouter);
 
-function buildHealthPayload(port: number) {
+async function buildHealthPayload(port: number) {
   const telegram = getTelegramRuntimeState();
+  const marketHealth = await getUnifiedHealthPayload().catch(() => ({
+    ok: true as const,
+    time: new Date().toISOString(),
+    sourcesActive: 0,
+    sourcesTotal: 12,
+  }));
   return {
     ok: true,
+    time: marketHealth.time,
+    sourcesActive: marketHealth.sourcesActive,
+    sourcesTotal: marketHealth.sourcesTotal,
     service: 'alphamentals-api',
     kind: 'backend',
     status: 'ok',
@@ -168,10 +185,16 @@ function buildHealthPayload(port: number) {
 // Health port is resolved after listen — store it once known.
 let resolvedPort = 3001;
 
-app.get('/api/health', (_req, res) => res.json(buildHealthPayload(resolvedPort)));
-app.get('/health', (_req, res) => res.json(buildHealthPayload(resolvedPort)));
+app.get('/api/health', async (_req, res) => res.json(await buildHealthPayload(resolvedPort)));
+app.get('/health', async (_req, res) => res.json(await buildHealthPayload(resolvedPort)));
 app.get('/api/ping', (_req, res) => res.json({ ok: true }));
 app.get('/ping', (_req, res) => res.json({ ok: true }));
+app.get('/api/sources/status', async (_req, res) => {
+  await bootstrapMarketIntelligence().catch(() => undefined);
+  res.json(getSourcesStatusPayload());
+});
+app.get('/api/news', async (_req, res) => res.json(await getUnifiedNewsPayload()));
+app.post('/api/refresh', async (_req, res) => res.json(await refreshMarketIntelligence()));
 
 // JSON 404 for all unknown /api/* routes — must come after every route registration.
 app.use('/api', (req: express.Request, res: express.Response) => {
@@ -285,6 +308,8 @@ async function bootstrap() {
     console.log(`[env] MT5_BRIDGE_URL present: ${Boolean(process.env.MT5_BRIDGE_URL)}`);
     console.log(`[env] MT5_BRIDGE_API_KEY present: ${Boolean(process.env.MT5_BRIDGE_API_KEY)}`);
     logOpenAIConfiguration();
+    console.log(`[env] OPENAI_MODEL=${process.env.OPENAI_MODEL ?? 'gpt-4o-mini'}`);
+    console.log(`[env] MYFXBOOK credentials detected: ${Boolean(process.env.MYFXBOOK_EMAIL && process.env.MYFXBOOK_PASSWORD)}`);
 
     if (!process.env.MYFXBOOK_EMAIL) console.warn('[alphamentals-api] MYFXBOOK_EMAIL not set — demo calendar data will be used');
 
@@ -302,6 +327,9 @@ async function bootstrap() {
     scheduleFundamentals();
     startMarketDataScheduler();
     scheduleAutomaticMt5Sync();
+    void bootstrapMarketIntelligence().catch((error) => {
+      console.warn('[market-intelligence] bootstrap failed:', error instanceof Error ? error.message : String(error));
+    });
   });
 }
 

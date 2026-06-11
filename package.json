@@ -5,6 +5,7 @@
   "main": "api/dist-api/backend/server/index.js",
   "scripts": {
     "dev:api": "tsx api/backend/server/index.ts",
+    "build": "npm run build:api",
     "build:api": "tsc -p tsconfig.backend.json",
     "start": "node api/dist-api/backend/server/index.js",
     "pm2:start": "pm2 start ecosystem.config.js",
@@ -18,7 +19,10 @@
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^5.1.0",
+    "node-cron": "^4.2.1",
     "pg": "^8.13.0",
+    "playwright": "^1.60.0",
+    "rss-parser": "^3.13.0",
     "ws": "^8.18.0",
     "zod": "^3.25.76"
   },

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { bootstrapFundamentals, getFundamentalsEvents, getFundamentalsNews, getFundamentalsOverview, refreshFundamentalsData } from '../services/fundamentals.service.js';
 import { getLatestAiAnalysisResponse, getLatestAiAnalysisForSymbolResponse, runAiAnalysis, getRunJobStatus } from '../services/aiAnalysisRuns.service.js';
 import { normalizeApiSymbol, normalizeDisplaySymbol } from '../../../src/services/pairs/symbolNormalizer.js';
-import { getTelegramRuntimeState } from '../services/telegramBridge.service.js';
+import { getTelegramRuntimeState, getTelegramScriptDiagnostics } from '../services/telegramBridge.service.js';
 import { getConfiguredOpenAIApiKey, getOpenAIModel } from '../lib/openaiConfig.js';
 import { getPersistenceStatus } from '../services/marketIntelligencePersistence.service.js';
 import { getActiveProviders } from '../lib/calendarProviders/index.js';
@@ -376,6 +376,7 @@ marketIntelligenceRouter.get('/diagnostics', async (_req, res) => {
     const overview = getFundamentalsOverview();
     const jobStatus = getRunJobStatus();
     const telegram = getTelegramRuntimeState();
+    const telegramScript = getTelegramScriptDiagnostics();
     const openaiKey = getConfiguredOpenAIApiKey();
     const persistence = await getPersistenceStatus();
     const calendarProviders = getActiveProviders();
@@ -420,13 +421,16 @@ marketIntelligenceRouter.get('/diagnostics', async (_req, res) => {
         lastError: myfxbookConfigured ? null : 'MYFXBOOK_EMAIL and MYFXBOOK_PASSWORD are missing',
       },
       telegram: {
-        available: telegram.connected,
-        configured: telegram.configured,
-        phase: telegram.currentPhase ?? telegram.errorPhase ?? 'TELEGRAM_UNAVAILABLE',
+        configured: telegramScript.configured,
+        available: telegramScript.available,
+        phase: telegramScript.phase,
+        selectedPython: telegramScript.selectedPython,
+        selectedScript: telegramScript.selectedScript,
+        checkedScriptPaths: telegramScript.checkedScriptPaths,
+        targetChat: telegramScript.targetChat,
+        resolvedChat: telegramScript.resolvedChat,
+        lastError: telegramScript.lastError,
         account: telegram.accountUsername ?? null,
-        targetChat: telegram.targetChat,
-        resolvedChat: telegram.targetChatTitle,
-        lastError: telegram.error,
         code: telegram.code,
         hints: telegram.hints,
       },

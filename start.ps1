@@ -43,6 +43,40 @@ function Test-PlaywrightInstall {
 
 Test-PlaywrightInstall
 
+function Test-PythonDependency {
+    param(
+        [string]$ModuleName,
+        [string]$Label,
+        [string]$InstallCommand
+    )
+
+    $pythonExe = if (Test-Path "mt5bridge\.venv\Scripts\python.exe") {
+        "mt5bridge\.venv\Scripts\python.exe"
+    }
+    else {
+        "py"
+    }
+
+    $pythonArgs = if ($pythonExe -eq "py") { @("-3.11", "-c", "import $ModuleName") } else { @("-c", "import $ModuleName") }
+
+    try {
+        & $pythonExe @pythonArgs 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  [OK] $Label installed" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  [FAIL] $Label missing. Run: $InstallCommand" -ForegroundColor Red
+        }
+    }
+    catch {
+        Write-Host "  [FAIL] $Label missing. Run: $InstallCommand" -ForegroundColor Red
+    }
+}
+
+Test-PythonDependency -ModuleName "telethon" -Label "Telethon" -InstallCommand "py -3.11 -m pip install --upgrade telethon"
+Test-PythonDependency -ModuleName "telegram" -Label "python-telegram-bot" -InstallCommand "py -3.11 -m pip install --upgrade python-telegram-bot"
+Test-PythonDependency -ModuleName "playwright" -Label "Python Playwright" -InstallCommand "py -3.11 -m pip install --upgrade playwright"
+
 function Get-DotEnvValue {
     param(
         [string]$Path,

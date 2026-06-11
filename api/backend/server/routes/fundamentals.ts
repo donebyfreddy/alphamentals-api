@@ -12,6 +12,7 @@ import {
 } from '../services/fundamentals.service.js';
 import { canRunScheduledAiAnalysis, getLatestAiAnalysisForSymbolResponse, runAiAnalysis } from '../services/aiAnalysisRuns.service.js';
 import { getCalendarPayload, getFundamentalsPayload, getNewsPayload } from '../services/marketIntelligence/marketIntelligenceHub.service.js';
+import { getMyfxbookCalendar, refreshMyfxbookCalendar } from '../services/myfxbookCalendar.service.js';
 
 function isAuthorizedCron(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
@@ -109,6 +110,78 @@ fundamentalsRouter.get('/events', async (_req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load fundamentals events';
     res.json({ events: [], sources: [], generatedAt: new Date().toISOString(), error: message });
+  }
+});
+
+// MyFXBook Playwright calendar endpoints. They never hard-fail if cache exists.
+fundamentalsRouter.get('/calendar/today', async (_req, res) => {
+  try {
+    res.json(await getMyfxbookCalendar('today'));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load today calendar';
+    res.json({
+      ok: false,
+      period: 'today',
+      events: [],
+      summary: {
+        period: 'today',
+        high_impact_events: [],
+        medium_impact_events: [],
+        currencies_affected: [],
+        risk_summary: 'MyFXBook calendar is unavailable and no cache was found.',
+        trading_warning: 'Calendar data unavailable. Use caution around scheduled macro releases.',
+        last_updated: new Date().toISOString(),
+      },
+      last_updated: null,
+      source: 'cache_fallback',
+      error: message,
+    });
+  }
+});
+
+fundamentalsRouter.get('/calendar/week', async (_req, res) => {
+  try {
+    res.json(await getMyfxbookCalendar('week'));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load week calendar';
+    res.json({
+      ok: false,
+      period: 'week',
+      events: [],
+      summary: {
+        period: 'week',
+        high_impact_events: [],
+        medium_impact_events: [],
+        currencies_affected: [],
+        risk_summary: 'MyFXBook weekly calendar is unavailable and no cache was found.',
+        trading_warning: 'Calendar data unavailable. Use caution around scheduled macro releases.',
+        last_updated: new Date().toISOString(),
+      },
+      last_updated: null,
+      source: 'cache_fallback',
+      error: message,
+    });
+  }
+});
+
+fundamentalsRouter.get('/calendar/refresh', async (_req, res) => {
+  try {
+    const bundle = await refreshMyfxbookCalendar();
+    res.json({
+      ok: bundle.ok,
+      source: bundle.source,
+      generated_at: bundle.generated_at,
+      today: await getMyfxbookCalendar('today'),
+      week: await getMyfxbookCalendar('week'),
+      error: bundle.error,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to refresh MyFXBook calendar';
+    res.json({
+      ok: false,
+      error: message,
+      detail: 'Live scraping failed and no usable cache was found.',
+    });
   }
 });
 

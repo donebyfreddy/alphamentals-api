@@ -440,6 +440,12 @@ export async function logTelegramStartupDiagnostics() {
   try {
     const doctor = await runScript<Record<string, unknown>>(['doctor'], 15_000);
     console.log('[telegram] Python bridge diagnostics', doctor);
+    if (doctor.telethon_installed === false) {
+      console.error('[telegram] Telethon is missing. Run: py -3.11 -m pip install --upgrade telethon');
+    }
+    if (doctor.python_telegram_bot_installed === false) {
+      console.warn('[telegram] python-telegram-bot is missing. Run: py -3.11 -m pip install --upgrade python-telegram-bot');
+    }
   } catch (err) {
     console.warn('[telegram] doctor check failed:', err instanceof Error ? err.message : String(err));
   }

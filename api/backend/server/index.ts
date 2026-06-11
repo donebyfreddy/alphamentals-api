@@ -334,11 +334,11 @@ async function bootstrap() {
 
     if (!process.env.MYFXBOOK_EMAIL) console.warn('[alphamentals-api] MYFXBOOK_EMAIL not set — demo calendar data will be used');
 
+    await logTelegramStartupDiagnostics();
     const telegramValidation = getTelegramStartupValidationMessage();
     if (telegramValidation) {
       console.warn(`[telegram] ${telegramValidation}`);
     } else {
-      await logTelegramStartupDiagnostics();
       void startTelegramMonitoring(async (message) => {
         await ingestTelegramMessage(message);
       });

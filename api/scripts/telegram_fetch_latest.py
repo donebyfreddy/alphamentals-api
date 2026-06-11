@@ -316,11 +316,21 @@ def _cmd_doctor() -> None:
         telethon_version  = None
         telethon_installed = False
 
+    try:
+        import telegram  # type: ignore
+        python_telegram_bot_version = getattr(telegram, '__version__', None)
+        python_telegram_bot_installed = True
+    except ImportError:
+        python_telegram_bot_version = None
+        python_telegram_bot_installed = False
+
     _emit({
         'ok':                     True,
         'python_version':         sys.version,
         'telethon_installed':     telethon_installed,
         'telethon_version':       telethon_version,
+        'python_telegram_bot_installed': python_telegram_bot_installed,
+        'python_telegram_bot_version': python_telegram_bot_version,
         'api_id_configured':      bool(api_id_str),
         'api_hash_configured':    bool(api_hash),
         'session_configured':     bool(session),

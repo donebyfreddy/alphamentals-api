@@ -9,6 +9,19 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Install-PythonPackage {
+    param(
+        [string]$PythonExe,
+        [string]$Package
+    )
+
+    & $PythonExe -m pip install --upgrade $Package
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ERROR: Failed to install Python package '$Package'." -ForegroundColor Red
+        exit 1
+    }
+}
+
 Write-Host "=== Alphamentals - INSTALL ===" -ForegroundColor Cyan
 Write-Host ""
 
@@ -84,21 +97,47 @@ else {
 
 Write-Host "[2/8] Installing Python requirements..." -ForegroundColor Yellow
 
+if (-not (Test-Path "requirements.txt")) {
+    Write-Host "  ERROR: requirements.txt not found." -ForegroundColor Red
+    exit 1
+}
+
 if (-not (Test-Path "mt5bridge\requirements.txt")) {
     Write-Host "  ERROR: mt5bridge\requirements.txt not found." -ForegroundColor Red
     exit 1
 }
 
-& "mt5bridge\.venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
+$venvPython = "mt5bridge\.venv\Scripts\python.exe"
+
+& $venvPython -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  ERROR: pip upgrade failed." -ForegroundColor Red
     exit 1
 }
 
-& "mt5bridge\.venv\Scripts\python.exe" -m pip install -r mt5bridge\requirements.txt --quiet
+& $venvPython -m pip install -r requirements.txt
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  ERROR: pip install failed." -ForegroundColor Red
+    Write-Host "  ERROR: root requirements install failed." -ForegroundColor Red
     exit 1
+}
+
+& $venvPython -m pip install -r mt5bridge\requirements.txt
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  ERROR: mt5bridge requirements install failed." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "  Installing Telegram and Playwright Python dependencies..." -ForegroundColor Yellow
+Install-PythonPackage -PythonExe $venvPython -Package "telethon"
+Install-PythonPackage -PythonExe $venvPython -Package "python-telegram-bot"
+Install-PythonPackage -PythonExe $venvPython -Package "playwright"
+
+& $venvPython -m playwright install chromium
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  WARNING: Python Playwright Chromium install failed." -ForegroundColor Yellow
+}
+else {
+    Write-Host "  Python Playwright Chromium installed." -ForegroundColor Green
 }
 
 Write-Host "  Python requirements installed." -ForegroundColor Green

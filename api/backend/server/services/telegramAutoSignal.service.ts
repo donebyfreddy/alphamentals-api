@@ -296,6 +296,8 @@ function buildTelegramSignalEmail(message: TelegramMessageRecord, result: Telegr
               ['Calendar Risk', result.newsAndSessionRisk.calendarRisk, '📅'],
             ])}
             ${result.fundamentalContext.keyDrivers.length ? `<div style="margin-top:10px;color:#f8fafc;font-weight:800;">Key Drivers</div>${bulletList(result.fundamentalContext.keyDrivers)}` : '<div style="margin-top:10px;color:#fca5a5;">Fundamental intelligence unavailable or stale. Macro alignment confidence reduced.</div>'}
+            ${result.fundamentalsContext?.highImpactEvents?.length ? `<div style="margin-top:10px;color:#f8fafc;font-weight:800;">Upcoming High-Impact Events</div>${bulletList(result.fundamentalsContext.highImpactEvents, '⚠️')}` : ''}
+            ${result.fundamentalsContext?.risks?.length ? `<div style="margin-top:10px;color:#f8fafc;font-weight:800;">Calendar / Macro Warnings</div>${bulletList(result.fundamentalsContext.risks, '📣')}` : ''}
             <div style="margin-top:10px;color:#dbe4f0;font-size:14px;">${escapeHtml(result.fundamentalContext.assessment)}</div>
           `, '#263a2f')}
 
@@ -401,6 +403,8 @@ function buildTelegramSignalEmail(message: TelegramMessageRecord, result: Telegr
     `Macro Bias: ${result.fundamentalContext.macroBias}${result.fundamentalContext.macroConfidence != null ? ` (${result.fundamentalContext.macroConfidence}%)` : ''}`,
     `Assessment: ${result.fundamentalContext.assessment}`,
     `Key Drivers: ${result.fundamentalContext.keyDrivers.join(' | ') || 'none'}`,
+    `Upcoming High-Impact Events: ${result.fundamentalsContext?.highImpactEvents.join(' | ') || 'none'}`,
+    `Calendar / Macro Warnings: ${result.fundamentalsContext?.risks.join(' | ') || 'none'}`,
     '',
     'NEWS / SESSION / VOLATILITY',
     `Calendar Risk: ${result.newsAndSessionRisk.calendarRisk}`,

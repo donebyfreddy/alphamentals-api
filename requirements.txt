@@ -1,4 +1,5 @@
-# Python 3.11 required — MetaTrader5 does not reliably support 3.12+
+# Root Python requirements for the Alphamentals backend helpers.
+# The MT5 bridge keeps its own pinned requirements in mt5bridge/requirements.txt.
 MetaTrader5==5.0.45
 fastapi==0.115.0
 uvicorn[standard]==0.30.6

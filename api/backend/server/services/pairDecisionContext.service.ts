@@ -1,5 +1,6 @@
 import { buildPairAnalysis } from './pairAnalysis.service.js';
 import { getActiveSession, getNextSession } from '../../../src/utils/sessions/sessionTimes.js';
+import { getTradingCalendarContext } from './myfxbookCalendar.service.js';
 
 export interface PairDecisionContext {
   symbol: string;
@@ -24,6 +25,7 @@ export interface PairDecisionContext {
   fundamentalReason: string;
   calendarRisk: 'low' | 'medium' | 'high';
   highImpactEvents: string[];
+  economicCalendarWarning: string | null;
   topDrivers: string[];
   bullishDrivers: string[];
   bearishDrivers: string[];
@@ -75,9 +77,15 @@ function deriveSpreadInfo(
 }
 
 export async function getPairDecisionContext(symbol: string): Promise<PairDecisionContext> {
-  const analysis = await buildPairAnalysis(symbol, { preferSavedAi: true });
+  const [analysis, liveCalendarContext] = await Promise.all([
+    buildPairAnalysis(symbol, { preferSavedAi: true }),
+    getTradingCalendarContext(symbol).catch(() => null),
+  ]);
 
-  const calendarRisk = deriveCalendarRisk(analysis);
+  const derivedCalendarRisk = deriveCalendarRisk(analysis);
+  const calendarRisk = liveCalendarContext && (liveCalendarContext.riskLevel === 'high' || derivedCalendarRisk !== 'high')
+    ? liveCalendarContext.riskLevel
+    : derivedCalendarRisk;
   const { spreadStatus, currentSpread } = deriveSpreadInfo(
     analysis.price.bid,
     analysis.price.ask,
@@ -91,6 +99,9 @@ export async function getPairDecisionContext(symbol: string): Promise<PairDecisi
       const currency = e.currency ? ` (${e.currency})` : '';
       return `${e.eventName}${currency} in ${e.minutesUntil}m`;
     });
+  const mergedHighImpactEvents = liveCalendarContext?.upcomingHighImpactEvents?.length
+    ? liveCalendarContext.upcomingHighImpactEvents
+    : highImpactEvents;
 
   let volatility: number | null = null;
   if (analysis.price.dayHigh != null && analysis.price.dayLow != null) {
@@ -123,7 +134,8 @@ export async function getPairDecisionContext(symbol: string): Promise<PairDecisi
     fundamentalSummary: analysis.intelligence.fundamentalBias.summary,
     fundamentalReason: analysis.fundamentals.reason,
     calendarRisk,
-    highImpactEvents,
+    highImpactEvents: mergedHighImpactEvents,
+    economicCalendarWarning: liveCalendarContext?.warning ?? null,
     topDrivers: analysis.fundamentals.keyDrivers,
     bullishDrivers: analysis.fundamentals.bullishDrivers,
     bearishDrivers: analysis.fundamentals.bearishDrivers,
@@ -139,7 +151,10 @@ export async function getPairDecisionContext(symbol: string): Promise<PairDecisi
     verdict: analysis.intelligence.overallBias,
     verdictScore: analysis.intelligence.biasPercentage,
     reasoning: analysis.intelligence.summary,
-    risks: analysis.intelligence.risks,
+    risks: [
+      ...(liveCalendarContext?.warning ? [liveCalendarContext.warning] : []),
+      ...analysis.intelligence.risks,
+    ],
     invalidation: analysis.intelligence.invalidation,
     dataGeneratedAt: analysis.fundamentals.lastUpdated,
     fundamentalsUpdatedAt: analysis.fundamentals.lastUpdated,

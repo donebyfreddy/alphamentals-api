@@ -40,6 +40,8 @@ mt5Router.get('/status', async (_req, res) => {
 
   res.json({
     ok: true,
+    provider: 'windows-vps-mt5',
+    metaapiEnabled: false,
     mt5: {
       bridgeUrl: bridge?.bridgeUrl ?? process.env.MT5_BRIDGE_URL ?? 'http://127.0.0.1:8001',
       bridgeReachable: bridge?.bridgeReachable ?? false,
@@ -49,6 +51,14 @@ mt5Router.get('/status', async (_req, res) => {
       lastCheckAt: bridge?.lastCheckAt ?? new Date().toISOString(),
       error: bridge?.error ?? null,
     },
+    bridgeReachable: bridge?.bridgeReachable ?? false,
+    terminalConnected: bridge?.terminalConnected ?? false,
+    account: bridge?.accountLogin
+      ? {
+          login: bridge.accountLogin,
+          server: bridge.server ?? null,
+        }
+      : (hb?.account ? { login: hb.accountId ?? null, server: null } : null),
     ea: {
       connected: eaConnected,
       status: hb ? (eaConnected ? 'connected' : 'stale') : 'no_heartbeat',

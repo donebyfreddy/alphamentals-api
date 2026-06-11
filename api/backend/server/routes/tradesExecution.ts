@@ -18,6 +18,7 @@ const executionPlanSchema = z.object({
     balance: z.number(),
     equity: z.number().optional().nullable(),
     currency: z.string().default('USD'),
+    brokerAccountId: z.string().optional().nullable(),
     metaApiAccountId: z.string().optional().nullable(),
     status: z.enum(['connected', 'disconnected', 'syncing', 'failed', 'pending', 'demo', 'unavailable', 'invalid_credentials']),
   }).nullable(),
@@ -61,6 +62,7 @@ const executionPlanSchema = z.object({
   marketGate: z.object({
     isMarketOpen: z.boolean(),
     isSymbolTradable: z.boolean(),
+    isExecutionBridgeConnected: z.boolean().optional(),
     isMetaApiConnected: z.boolean(),
     isBrokerHealthy: z.boolean(),
     spread: z.number().optional().nullable(),
@@ -132,7 +134,21 @@ tradeExecutionRouter.post('/execute', async (req, res) => {
   }
 
   try {
-    const result = await executeAccountableTrade(parsed.data as TradeExecutionPlan);
+    const normalizedPlan = {
+      ...parsed.data,
+      account: parsed.data.account
+        ? {
+            ...parsed.data.account,
+            brokerAccountId: parsed.data.account.brokerAccountId ?? parsed.data.account.metaApiAccountId ?? undefined,
+          }
+        : null,
+      marketGate: {
+        ...parsed.data.marketGate,
+        isExecutionBridgeConnected: parsed.data.marketGate.isExecutionBridgeConnected ?? parsed.data.marketGate.isMetaApiConnected,
+      },
+    } as TradeExecutionPlan;
+
+    const result = await executeAccountableTrade(normalizedPlan);
     res.status(result.success ? 200 : 422).json(result);
   } catch (error) {
     res.status(500).json({

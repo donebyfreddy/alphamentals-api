@@ -1,0 +1,119 @@
+{
+  "articles": [
+    {
+      "id": "news_aHR0cHM6Ly93d3cuZmVkZXJh",
+      "source": "Federal Reserve Press",
+      "sourceType": "rss",
+      "title": "Federal Reserve Board announces that results from its annual bank stress test will be released on Wednesday, June 24, at 4 p.m. EDT.",
+      "summary": "Federal Reserve Board announces that results from its annual bank stress test will be released on Wednesday, June 24, at 4 p.m. EDT.",
+      "contentSnippet": "Federal Reserve Board announces that results from its annual bank stress test will be released on Wednesday, June 24, at 4 p.m. EDT.",
+      "url": "https://www.federalreserve.gov/newsevents/pressreleases/bcreg20260609a.htm",
+      "publishedAt": "2026-06-09T20:00:00.000Z",
+      "fetchedAt": "2026-06-11T13:24:35.165Z",
+      "affectedCurrencies": [
+        "DXY",
+        "XAU",
+        "USD",
+        "EUR",
+        "GBP"
+      ],
+      "affectedSymbols": [
+        "DXY",
+        "XAU/USD",
+        "EUR/USD",
+        "GBP/USD"
+      ],
+      "impact": "high",
+      "sentiment": "neutral",
+      "topicTags": [
+        "fed",
+        "gold"
+      ],
+      "macroCategory": [
+        "monetary_policy"
+      ],
+      "marketImpactExplanation": "monetary policy data relevant to DXY, XAU/USD, EUR/USD",
+      "relevanceScore": 35,
+      "aiSummary": "Federal Reserve Board announces that results from its annual bank stress test will be released on Wednesday, June 24, at 4 p.m. EDT.",
+      "rawData": null
+    },
+    {
+      "id": "news_aHR0cHM6Ly9pbnZlc3Rpbmds",
+      "source": "ForexLive",
+      "sourceType": "rss",
+      "title": "investingLive Asia-Pacific FX news wrap: OpenAI is considering major price cuts (WSJ)",
+      "summary": "ICYMI - Georgia central bank buys $100mn more gold as global reserve demand surges Iran fires fresh missiles at Jordan, Kuwait and Bahrain in widening attacks WSJ: OpenAI weighs major price cuts to compete with Anthropic before IPO push Gaslighting the oil market - global oil inventories six weeks from operational minimums PBOC sets USD/ CNY reference rate for today at 6.8150 (vs. estimate at 6.7819) Oil update ICYMI - US bombed Iran second night in a row Iran denies Trump contact claim as US says no warships hit in Hormuz NinjaTrader licensing glitch broke your indicators? Here's the fix (its",
+      "contentSnippet": "ICYMI - Georgia central bank buys $100mn more gold as global reserve demand surges Iran fires fresh missiles at Jordan, Kuwait and Bahrain in widening attacks WSJ: OpenAI weighs major price cuts to compete with Anthropic before IPO push Gaslighting the oil market - global oil inventories six weeks f",
+      "url": "https://investinglive.com/news/investinglive-asia-pacific-fx-news-wrap-openai-is-considering-major-price-cuts-wsj-20260611/",
+      "publishedAt": "2026-06-11T03:29:18.000Z",
+      "fetchedAt": "2026-06-11T13:24:33.591Z",
+      "affectedCurrencies": [],
+      "affectedSymbols": [],
+      "impact": "low",
+      "sentiment": "mixed",
+      "topicTags": [
+        "geopolitical",
+        "risk-off",
+        "politics"
+      ],
+      "macroCategory": [
+        "monetary_policy",
+        "trade",
+        "geopolitics"
+      ],
+      "marketImpactExplanation": "",
+      "relevanceScore": 29,
+      "aiSummary": "ICYMI - Georgia central bank buys $100mn more gold as global reserve demand surges Iran fires fresh missiles at Jordan, Kuwait and Bahrain in widening attacks WSJ: OpenAI weighs major price cuts to compete with Anthropic before IPO push Gaslighting the oil market - global oil inventories six weeks from operational minimums PBOC sets USD/ CNY reference rate for today at 6.8150 (vs. estimate at 6.7819) Oil update ICYMI - US bombed Iran second night in a row Iran denies Trump contact claim as US says no warships hit in Hormuz NinjaTrader licensing glitch broke your indicators? Here's the fix (its",
+      "rawData": null
+    },
+    {
+      "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+      "source": "FXStreet",
+      "sourceType": "rss",
+      "title": "Turkish Lira: Hawkish CBRT tone but lira risks ahead – ING",
+      "summary": "ING’s Frantisek Taborsky expects the Central Bank of Turkey (CBRT) to keep its policy rate at 37%, maintaining a tight stance and policy flexibility.",
+      "contentSnippet": "ING’s Frantisek Taborsky expects the Central Bank of Turkey (CBRT) to keep its policy rate at 37%, maintaining a tight stance and policy flexibility.",
+      "url": "https://www.fxstreet.com/news/turkish-lira-hawkish-cbrt-tone-but-lira-risks-ahead-ing-202606110930",
+      "publishedAt": "2026-06-11T09:30:24.000Z",
+      "fetchedAt": "2026-06-11T13:24:33.688Z",
+      "affectedCurrencies": [],
+      "affectedSymbols": [],
+      "impact": "low",
+      "sentiment": "mixed",
+      "topicTags": [
+        "hawkish-fed"
+      ],
+      "macroCategory": [
+        "monetary_policy"
+      ],
+      "marketImpactExplanation": "",
+      "relevanceScore": 25,
+      "aiSummary": "ING’s Frantisek Taborsky expects the Central Bank of Turkey (CBRT) to keep its policy rate at 37%, maintaining a tight stance and policy flexibility.",
+      "rawData": null
+    },
+    {
+      "id": "news_aHR0cHM6Ly93d3cuaW52ZXN0",
+      "source": "Investing.com Gold",
+      "sourceType": "rss",
+      "title": "CoinZoom Becomes First U.S.-Regulated Exchange to Support USDT on Ethereum, Tron, and BNB Smart Chain",
+      "summary": "CoinZoom Becomes First U.S.-Regulated Exchange to Support USDT on Ethereum, Tron, and BNB Smart Chain",
+      "contentSnippet": null,
+      "url": "https://www.investing.com/news/cryptocurrency-news/coinzoom-becomes-first-usregulated-exchange-to-support-usdt-on-ethereum-tron-and-bnb-smart-chain-4733167",
+      "publishedAt": "2026-06-09T11:30:35.000Z",
+      "fetchedAt": "2026-06-11T13:24:35.003Z",
+      "affectedCurrencies": [],
+      "affectedSymbols": [],
+      "impact": "low",
+      "sentiment": "neutral",
+      "topicTags": [],
+      "macroCategory": [
+        "other"
+      ],
+      "marketImpactExplanation": "",
+      "relevanceScore": 11,
+      "aiSummary": "CoinZoom Becomes First U.S.-Regulated Exchange to Support USDT on Ethereum, Tron, and BNB Smart Chain",
+      "rawData": null
+    }
+  ],
+  "savedAt": "2026-06-11T13:24:35.228Z"
+}

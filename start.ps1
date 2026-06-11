@@ -8,6 +8,41 @@ $ErrorActionPreference = "Stop"
 Write-Host "=== Alphamentals START ===" -ForegroundColor Cyan
 Write-Host ""
 
+function Test-PlaywrightInstall {
+    try {
+        $versionOutput = npx playwright --version 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  [FAIL] Playwright not installed" -ForegroundColor Red
+            return
+        }
+
+        Write-Host "  [OK] Playwright installed ($versionOutput)" -ForegroundColor Green
+
+        $statusJson = node -e "const fs=require('fs'); (async()=>{ try { const p=await import('playwright'); const result={ chromium: fs.existsSync(p.chromium.executablePath()), firefox: fs.existsSync(p.firefox.executablePath()), webkit: fs.existsSync(p.webkit.executablePath()) }; console.log(JSON.stringify(result)); } catch { console.log(JSON.stringify({ chromium:false, firefox:false, webkit:false })); } })();" 2>$null
+        $status = $statusJson | ConvertFrom-Json
+
+        if ($status.chromium) {
+            Write-Host "  [OK] Chromium installed" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  [FAIL] Chromium not installed" -ForegroundColor Red
+        }
+
+        if ($status.firefox) {
+            Write-Host "  [OK] Firefox installed" -ForegroundColor Green
+        }
+
+        if ($status.webkit) {
+            Write-Host "  [OK] WebKit installed" -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host "  [FAIL] Playwright not installed" -ForegroundColor Red
+    }
+}
+
+Test-PlaywrightInstall
+
 function Get-DotEnvValue {
     param(
         [string]$Path,
@@ -157,6 +192,10 @@ if ($apiOk) {
         "EA Status   http://localhost:3001/ea/status" `
         "http://localhost:3001/ea/status" `
         $authHeaders | Out-Null
+
+    Invoke-HealthCheck `
+        "Playwright  http://localhost:3001/api/system/playwright-status" `
+        "http://localhost:3001/api/system/playwright-status" | Out-Null
 
     # Check /ea/ticks using MT5_BRIDGE_API_KEY
     try {

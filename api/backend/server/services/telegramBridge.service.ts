@@ -1,6 +1,17 @@
+/**
+ * Telegram Bridge Service
+ *
+ * Spawns api/scripts/telegram_fetch_latest.py (Telethon-based) to fetch the
+ * latest messages from a configured Telegram group and filter XAUUSD/GOLD
+ * limit-order signals.
+ *
+ * The old Python monitor-process approach has been removed.  This service
+ * makes one-shot subprocess calls (fetch-latest, test, doctor) instead.
+ */
+
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
-import readline from 'node:readline';
+import fs from 'node:fs';
 import { getTelegramEnvConfig } from '../config/telegram.js';
 import type {
   TelegramAttachmentMetadata,
@@ -8,38 +19,9 @@ import type {
   TelegramReplyInfo,
 } from '../types/telegram.js';
 
-type BridgeErrorPayload = {
-  ok?: boolean;
-  code?: string;
-  message?: string;
-  details?: string | null;
-  phase?: string | null;
-  operation?: string | null;
-  targetChat?: string | null;
-  loginOk?: boolean;
-  targetChatResolved?: boolean;
-  canReadMessages?: boolean;
-  account?: BridgeAccountPayload | null;
-  targetChatInfo?: BridgeChatPayload & { username?: string | null; normalized?: string | null } | null;
-  hints?: string[] | null;
-  errorName?: string | null;
-  errorCode?: string | null;
-  stack?: string | null;
-};
-
-type BridgeChatPayload = {
-  id?: string | null;
-  title?: string | null;
-  type?: string | null;
-  username?: string | null;
-  normalized?: string | null;
-};
-
-type BridgeAccountPayload = {
-  id?: string | null;
-  username?: string | null;
-  displayName?: string | null;
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// Public types
+// ─────────────────────────────────────────────────────────────────────────────
 
 export type TelegramBridgeMessagePayload = {
   telegramMessageId: string;
@@ -54,99 +36,190 @@ export type TelegramBridgeMessagePayload = {
   attachments: TelegramAttachmentMetadata[];
 };
 
-type TestCommandSuccess = {
-  ok: true;
-  connected: boolean;
-  loggedIn?: boolean;
-  target_chat_accessible: boolean;
-  target_chat_resolved?: boolean;
-  can_read_messages?: boolean;
-  current_phase?: string | null;
-  last_message_date?: string | null;
-  error_phase?: string | null;
-  error_code?: string | null;
-  hints?: string[] | null;
-  account?: BridgeAccountPayload;
-  target_chat?: BridgeChatPayload;
+export type TelegramLimitSignal = {
+  id: string;
+  messageId: string;
+  chatId: string;
+  rawText: string;
+  symbol: 'XAUUSD';
+  side: 'BUY' | 'SELL';
+  orderType: 'LIMIT';
+  entry: number | null;
+  stopLoss: number | null;
+  takeProfits: number[];
+  sentAt: string;
+  source: 'telegram';
 };
 
-type FetchHistorySuccess = {
-  ok: true;
-  chat?: BridgeChatPayload;
-  messages?: TelegramBridgeMessagePayload[];
-  messages_fetched?: number;
-  loggedIn?: boolean;
-  target_chat_resolved?: boolean;
-  can_read_messages?: boolean;
-  last_message_date?: string | null;
-  hints?: string[] | null;
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// Script resolution
+// ─────────────────────────────────────────────────────────────────────────────
 
-type DoctorCommandSuccess = {
-  ok: true;
-  python_version?: string;
-  telethon_installed?: boolean;
-  dotenv_loaded?: boolean;
-  session_configured?: boolean;
-  session_source?: string | null;
-  session_error?: string | null;
-  api_id_configured?: boolean;
-  api_hash_configured?: boolean;
-  target_chat_configured?: boolean;
-  working_directory?: string | null;
-};
+type BridgeScriptResolution = { scriptPath: string; checkedPaths: string[] };
 
-type MonitorStatusEvent = {
-  event: 'status';
-  stage: 'session_loaded' | 'connecting' | 'logged_in' | 'resolving_target_chat' | 'target_chat_connected' | 'reading_messages' | 'message_read_test_ok' | 'monitoring_enabled';
-  phase?: string;
-  message?: string;
-  username?: string | null;
-  displayName?: string | null;
-  chatId?: string | null;
-  chatTitle?: string | null;
-  chatType?: string | null;
-  targetChat?: string | null;
-  targetChatNormalized?: string | null;
-  loginOk?: boolean;
-  targetChatResolved?: boolean;
-  canReadMessages?: boolean;
-  account?: BridgeAccountPayload | null;
-  lastMessageDate?: string | null;
-  sessionSource?: string | null;
-  sessionFile?: string | null;
-};
+function resolveBridgeScript(): BridgeScriptResolution {
+  const envPath =
+    process.env.TELEGRAM_BRIDGE_SCRIPT_PATH?.trim() ||
+    process.env.TELEGRAM_PYTHON_SCRIPT?.trim() ||
+    null;
 
-type MonitorMessageEvent = {
-  event: 'message';
-  message: TelegramBridgeMessagePayload;
-};
+  if (envPath) {
+    console.log(`[telegram] resolving bridge script from env: ${envPath}`);
+    return { scriptPath: envPath, checkedPaths: [envPath] };
+  }
 
-type MonitorErrorEvent = {
-  event: 'error' | 'warning';
-  code?: string;
-  message?: string;
-  details?: string | null;
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(cwd, 'api', 'scripts', 'telegram_fetch_latest.py'),
+    path.join(cwd, 'scripts', 'telegram_fetch_latest.py'),
+    path.join(cwd, 'backend', 'scripts', 'telegram_fetch_latest.py'),
+    path.join(cwd, 'telegram_fetch_latest.py'),
+  ];
+
+  console.log('[telegram] resolving bridge script');
+  console.log('[telegram] checked script paths:', candidates.join(', '));
+
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        console.log(`[telegram] selected script: ${p}`);
+        return { scriptPath: p, checkedPaths: candidates };
+      }
+    } catch { /* skip */ }
+  }
+
+  console.warn('[telegram] bridge script not found. Checked:', candidates.join(', '));
+  return { scriptPath: candidates[0], checkedPaths: candidates };
+}
+
+const _scriptResolution = resolveBridgeScript();
+const TELEGRAM_BRIDGE_SCRIPT = _scriptResolution.scriptPath;
+const TELEGRAM_CHECKED_SCRIPT_PATHS = _scriptResolution.checkedPaths;
+
+function isBridgeScriptPresent(): boolean {
+  try {
+    return fs.existsSync(TELEGRAM_BRIDGE_SCRIPT);
+  } catch {
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Python executable resolution
+// ─────────────────────────────────────────────────────────────────────────────
+
+type PythonSpec = { cmd: string; cmdArgs: string[]; label: string };
+
+function buildPythonCandidates(): PythonSpec[] {
+  const cwd = process.cwd();
+
+  const explicit: PythonSpec[] = (
+    [
+      process.env.TELEGRAM_PYTHON_PATH?.trim(),
+      process.env.TELEGRAM_PYTHON_BIN?.trim(),
+      process.env.PYTHON_EXECUTABLE?.trim(),
+    ] as (string | undefined)[]
+  )
+    .filter((v): v is string => Boolean(v))
+    .map((cmd) => ({ cmd, cmdArgs: [], label: `env:${cmd}` }));
+
+  const venvPaths: PythonSpec[] = [
+    path.join(cwd, '.venv', 'Scripts', 'python.exe'),
+    path.join(cwd, '.venv', 'bin', 'python'),
+    path.join(cwd, 'mt5bridge', '.venv', 'Scripts', 'python.exe'),
+    path.join(cwd, 'mt5bridge', '.venv', 'bin', 'python'),
+  ]
+    .filter((p) => { try { return fs.existsSync(p); } catch { return false; } })
+    .map((p) => ({ cmd: p, cmdArgs: [], label: `venv:${path.basename(p)}` }));
+
+  const windowsPaths: PythonSpec[] = [
+    String.raw`C:\Users\Administrator\AppData\Local\Programs\Python\Python311\python.exe`,
+  ]
+    .filter((p) => { try { return fs.existsSync(p); } catch { return false; } })
+    .map((p) => ({ cmd: p, cmdArgs: [], label: 'win:python311' }));
+
+  const standard: PythonSpec[] = [
+    { cmd: 'py', cmdArgs: ['-3.11'], label: 'py -3.11' },
+    { cmd: 'py', cmdArgs: [],       label: 'py' },
+    { cmd: 'python3', cmdArgs: [],  label: 'python3' },
+    { cmd: 'python',  cmdArgs: [],  label: 'python' },
+  ];
+
+  const all = [...explicit, ...venvPaths, ...windowsPaths, ...standard];
+  console.log('[telegram] Python candidates:', all.map((s) => s.label).join(', '));
+  return all;
+}
+
+const PYTHON_CANDIDATES: PythonSpec[] = buildPythonCandidates();
+let resolvedPythonSpec: PythonSpec | null = null;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TelegramBridgeError
+// ─────────────────────────────────────────────────────────────────────────────
+
+type BridgeErrorContext = {
   phase?: string | null;
   operation?: string | null;
   targetChat?: string | null;
   loginOk?: boolean;
   targetChatResolved?: boolean;
   canReadMessages?: boolean;
-  account?: BridgeAccountPayload | null;
-  targetChatInfo?: BridgeChatPayload | null;
+  account?: { id?: string | null; username?: string | null; displayName?: string | null } | null;
+  targetChatInfo?: { id?: string | null; title?: string | null; type?: string | null; username?: string | null; normalized?: string | null } | null;
   hints?: string[] | null;
   errorName?: string | null;
   errorCode?: string | null;
   stack?: string | null;
 };
 
-type MonitorEvent = MonitorStatusEvent | MonitorMessageEvent | MonitorErrorEvent;
+export class TelegramBridgeError extends Error {
+  code: string;
+  details: string | null;
+  status: number;
+  phase: string | null;
+  operation: string | null;
+  targetChat: string | null;
+  loginOk: boolean;
+  targetChatResolved: boolean;
+  canReadMessages: boolean;
+  account: BridgeErrorContext['account'];
+  targetChatInfo: BridgeErrorContext['targetChatInfo'];
+  hints: string[];
+  errorName: string | null;
+  errorCode: string | null;
+  stackDetails: string | null;
 
-type MonitorHandlers = {
-  onEvent: (event: MonitorEvent) => void;
-  onExit: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
-};
+  constructor(code: string, message: string, details: string | null = null, ctx: BridgeErrorContext = {}) {
+    super(message);
+    this.code = code;
+    this.details = details;
+    this.status = mapCodeToStatus(code);
+    this.phase = ctx.phase ?? null;
+    this.operation = ctx.operation ?? null;
+    this.targetChat = ctx.targetChat ?? null;
+    this.loginOk = ctx.loginOk ?? false;
+    this.targetChatResolved = ctx.targetChatResolved ?? false;
+    this.canReadMessages = ctx.canReadMessages ?? false;
+    this.account = ctx.account ?? null;
+    this.targetChatInfo = ctx.targetChatInfo ?? null;
+    this.hints = ctx.hints ?? [];
+    this.errorName = ctx.errorName ?? null;
+    this.errorCode = ctx.errorCode ?? null;
+    this.stackDetails = ctx.stack ?? null;
+  }
+}
+
+function mapCodeToStatus(code: string): number {
+  if (code === 'MISSING_CREDENTIALS' || code === 'INVALID_API_ID' || code === 'INVALID_TARGET_CHAT') return 400;
+  if (code === 'INVALID_API_CREDENTIALS' || code === 'INVALID_SESSION') return 401;
+  if (code === 'TARGET_CHAT_ACCESS_DENIED') return 403;
+  if (code === 'TELEGRAM_RATE_LIMIT') return 429;
+  return 503;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Runtime state
+// ─────────────────────────────────────────────────────────────────────────────
 
 type TelegramBridgeRuntimeState = {
   enabled: boolean;
@@ -158,7 +231,7 @@ type TelegramBridgeRuntimeState = {
   targetChatTitle: string | null;
   targetChatType: string | null;
   accountUsername: string | null;
-  account: BridgeAccountPayload | null;
+  account: BridgeErrorContext['account'];
   targetChatResolved: boolean;
   canReadMessages: boolean;
   messagesFetched: number;
@@ -173,110 +246,6 @@ type TelegramBridgeRuntimeState = {
   lastSyncAt: string | null;
   lastProcessedMessageId: string | null;
 };
-
-type BridgeScriptResolution = { scriptPath: string; checkedPaths: string[] };
-
-// Resolve the Telegram bridge script path. Allow override via env var.
-// TELEGRAM_BRIDGE_SCRIPT_PATH and TELEGRAM_PYTHON_SCRIPT are both accepted.
-// Searches common locations across various project structures.
-function resolveBridgeScript(): BridgeScriptResolution {
-  const envPath = (process.env.TELEGRAM_BRIDGE_SCRIPT_PATH?.trim() || process.env.TELEGRAM_PYTHON_SCRIPT?.trim()) || null;
-  if (envPath) {
-    console.log(`[telegram] resolving bridge script from env: ${envPath}`);
-    return { scriptPath: envPath, checkedPaths: [envPath] };
-  }
-  const candidates = [
-    path.join(process.cwd(), 'backend', 'scripts', 'telegram_bridge.py'),
-    path.join(process.cwd(), 'backend', 'server', 'scripts', 'telegram_bridge.py'),
-    path.join(process.cwd(), 'backend', 'services', 'telegram_bridge.py'),
-    path.join(process.cwd(), 'backend', 'telegram_bridge.py'),
-    path.join(process.cwd(), 'scripts', 'telegram_bridge.py'),
-    path.join(process.cwd(), 'api', 'scripts', 'telegram_bridge.py'),
-    path.join(process.cwd(), 'telegram_bridge.py'),
-  ];
-  console.log('[telegram] resolving bridge script');
-  console.log('[telegram] checked script paths:', candidates.join(', '));
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { existsSync } = require('node:fs') as typeof import('node:fs');
-  for (const p of candidates) {
-    if (existsSync(p)) {
-      console.log(`[telegram] selected script: ${p}`);
-      return { scriptPath: p, checkedPaths: candidates };
-    }
-  }
-  console.warn('[telegram] bridge script not found. Checked:', candidates.join(', '));
-  // Return default path so error messages show an expected location; checkedPaths surfaces all tried locations.
-  return { scriptPath: candidates[4], checkedPaths: candidates };
-}
-
-const _bridgeScriptResolution = resolveBridgeScript();
-const TELEGRAM_BRIDGE_SCRIPT = _bridgeScriptResolution.scriptPath;
-const TELEGRAM_CHECKED_SCRIPT_PATHS = _bridgeScriptResolution.checkedPaths;
-
-function isBridgeScriptPresent(): boolean {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { existsSync } = require('node:fs') as typeof import('node:fs');
-  return existsSync(TELEGRAM_BRIDGE_SCRIPT);
-}
-
-// PythonSpec: cmd = executable, cmdArgs = version args prepended before the script.
-// e.g. { cmd: 'py', cmdArgs: ['-3.11'], label: 'py -3.11' }
-type PythonSpec = { cmd: string; cmdArgs: string[]; label: string };
-
-// Resolution order:
-// 1. Explicit env override: TELEGRAM_PYTHON_PATH, TELEGRAM_PYTHON_BIN, PYTHON_EXECUTABLE
-// 2. Venv paths that EXIST on disk (checked with existsSync — no ENOENT)
-// 3. Windows py launcher: py -3.11, then py (correct 2-arg spawn)
-// 4. Standard names: python3, python
-function buildPythonCandidates(): PythonSpec[] {
-  // Use synchronous existsSync to filter venv paths that actually exist
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { existsSync } = require('node:fs') as typeof import('node:fs');
-
-  const explicit: PythonSpec[] = [
-    process.env.TELEGRAM_PYTHON_PATH?.trim(),
-    process.env.TELEGRAM_PYTHON_BIN?.trim(),
-    process.env.PYTHON_EXECUTABLE?.trim(),
-  ]
-    .filter(Boolean)
-    .map((cmd) => ({ cmd: cmd!, cmdArgs: [], label: `env:${cmd}` }));
-
-  // Only include venv paths that actually exist — prevents ENOENT on missing venv
-  const venvPaths: PythonSpec[] = [
-    path.join(process.cwd(), '.venv', 'Scripts', 'python.exe'),
-    path.join(process.cwd(), '.venv', 'bin', 'python'),
-    path.join(process.cwd(), 'mt5bridge', '.venv', 'Scripts', 'python.exe'),
-    path.join(process.cwd(), 'mt5bridge', '.venv', 'bin', 'python'),
-  ]
-    .filter((p) => { try { return existsSync(p); } catch { return false; } })
-    .map((p) => ({ cmd: p, cmdArgs: [], label: `venv:${path.basename(p)}` }));
-
-  // Known Windows system Python installations — only include if the exe exists.
-  const windowsPaths: PythonSpec[] = [
-    String.raw`C:\Users\Administrator\AppData\Local\Programs\Python\Python311\python.exe`,
-  ]
-    .filter((p) => { try { return existsSync(p); } catch { return false; } })
-    .map((p) => ({ cmd: p, cmdArgs: [], label: 'win:python311' }));
-
-  const standard: PythonSpec[] = [
-    // py -3.11: spawn('py', ['-3.11', script, ...args]) — Windows version-specific launcher
-    { cmd: 'py', cmdArgs: ['-3.11'], label: 'py -3.11' },
-    { cmd: 'py', cmdArgs: [], label: 'py' },
-    { cmd: 'python3', cmdArgs: [], label: 'python3' },
-    { cmd: 'python', cmdArgs: [], label: 'python' },
-  ];
-
-  const all = [...explicit, ...venvPaths, ...windowsPaths, ...standard];
-  console.log('[telegram] Python candidates:', all.map((s) => s.label).join(', '));
-  return all;
-}
-
-const PYTHON_CANDIDATES: PythonSpec[] = buildPythonCandidates();
-
-let resolvedPythonSpec: PythonSpec | null = null;
-let monitorProcess: ReturnType<typeof spawn> | null = null;
-let monitorRestartTimer: NodeJS.Timeout | null = null;
-let intentionalMonitorStop = false;
 
 const runtimeState: TelegramBridgeRuntimeState = {
   enabled: false,
@@ -304,74 +273,35 @@ const runtimeState: TelegramBridgeRuntimeState = {
   lastProcessedMessageId: null,
 };
 
-export class TelegramBridgeError extends Error {
-  code: string;
-  details: string | null;
-  status: number;
-  phase: string | null;
-  operation: string | null;
-  targetChat: string | null;
-  loginOk: boolean;
-  targetChatResolved: boolean;
-  canReadMessages: boolean;
-  account: BridgeAccountPayload | null;
-  targetChatInfo: BridgeChatPayload | null;
-  hints: string[];
-  errorName: string | null;
-  errorCode: string | null;
-  stackDetails: string | null;
-
-  constructor(code: string, message: string, details: string | null = null, context: Partial<BridgeErrorPayload> = {}) {
-    super(message);
-    this.code = code;
-    this.details = details;
-    this.status = mapBridgeErrorCodeToHttpStatus(code);
-    this.phase = context.phase ?? null;
-    this.operation = context.operation ?? null;
-    this.targetChat = context.targetChat ?? null;
-    this.loginOk = context.loginOk ?? false;
-    this.targetChatResolved = context.targetChatResolved ?? false;
-    this.canReadMessages = context.canReadMessages ?? false;
-    this.account = context.account ?? null;
-    this.targetChatInfo = context.targetChatInfo ?? null;
-    this.hints = context.hints ?? [];
-    this.errorName = context.errorName ?? null;
-    this.errorCode = context.errorCode ?? null;
-    this.stackDetails = context.stack ?? null;
+function syncBaseState() {
+  const cfg = getTelegramEnvConfig();
+  runtimeState.enabled = cfg.enabled;
+  runtimeState.configured = cfg.configured;
+  runtimeState.targetChat = cfg.targetChat;
+  if (cfg.error && cfg.enabled) {
+    runtimeState.error = cfg.error;
+    runtimeState.code = 'MISSING_CREDENTIALS';
+    runtimeState.currentPhase = 'load_session';
+    runtimeState.errorPhase = 'load_session';
   }
 }
 
-function parseJsonLine<T>(line: string): T | null {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
+// ─────────────────────────────────────────────────────────────────────────────
+// Core subprocess helper
+// ─────────────────────────────────────────────────────────────────────────────
 
-  try {
-    return JSON.parse(trimmed) as T;
-  } catch {
-    return null;
+function parseLastJsonLine<T>(output: string): T | null {
+  const lines = output.trim().split('\n').filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      return JSON.parse(lines[i]) as T;
+    } catch { /* continue */ }
   }
+  return null;
 }
 
-function mapBridgeErrorCodeToHttpStatus(code: string) {
-  if (code === 'MISSING_CREDENTIALS' || code === 'INVALID_API_ID' || code === 'INVALID_TARGET_CHAT') return 400;
-  if (code === 'INVALID_API_CREDENTIALS' || code === 'INVALID_SESSION') return 401;
-  if (code === 'TARGET_CHAT_ACCESS_DENIED') return 403;
-  if (code === 'TELEGRAM_RATE_LIMIT') return 429;
-  return 503;
-}
-
-function toBridgeError(payload: BridgeErrorPayload | null, fallbackMessage: string) {
-  return new TelegramBridgeError(
-    payload?.code ?? 'TELEGRAM_UNAVAILABLE',
-    payload?.message ?? fallbackMessage,
-    payload?.details ?? null,
-    payload ?? {},
-  );
-}
-
-async function tryRunPythonCommand(spec: PythonSpec, args: string[], timeoutMs: number) {
-  return await new Promise<{ stdout: string; stderr: string; spec: PythonSpec }>((resolve, reject) => {
-    // Correctly prepend version args: spawn('py', ['-3.11', script, ...args])
+async function spawnScript(spec: PythonSpec, args: string[], timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
     const child = spawn(spec.cmd, [...spec.cmdArgs, TELEGRAM_BRIDGE_SCRIPT, ...args], {
       cwd: process.cwd(),
       env: process.env,
@@ -380,44 +310,33 @@ async function tryRunPythonCommand(spec: PythonSpec, args: string[], timeoutMs: 
 
     let stdout = '';
     let stderr = '';
+    child.stdout.on('data', (c) => { stdout += c.toString(); });
+    child.stderr.on('data', (c) => { stderr += c.toString(); });
 
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    const timeout = setTimeout(() => {
+    const timer = setTimeout(() => {
       child.kill('SIGTERM');
       reject(new TelegramBridgeError('TELEGRAM_TIMEOUT', 'Telegram request timed out.'));
     }, timeoutMs);
 
-    child.on('error', (error: NodeJS.ErrnoException) => {
-      clearTimeout(timeout);
-      if (error.code === 'ENOENT') {
-        reject(error);
-        return;
-      }
-      reject(new TelegramBridgeError('TELEGRAM_UNAVAILABLE', error.message));
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      clearTimeout(timer);
+      if (err.code === 'ENOENT') { reject(err); return; }
+      reject(new TelegramBridgeError('TELEGRAM_UNAVAILABLE', err.message));
     });
 
     child.on('close', (code) => {
-      clearTimeout(timeout);
-      if (code === 0) {
-        resolve({ stdout, stderr, spec });
-        return;
-      }
-
-      const stdoutLines = stdout.trim().split('\n').filter(Boolean);
-      const stderrLines = stderr.trim().split('\n').filter(Boolean);
-      const payload = parseJsonLine<BridgeErrorPayload>(stdoutLines.at(-1) ?? '') ?? parseJsonLine<BridgeErrorPayload>(stderrLines.at(-1) ?? '');
-      reject(toBridgeError(payload, stderr.trim() || stdout.trim() || 'Telegram command failed.'));
+      clearTimeout(timer);
+      if (code === 0) { resolve(stdout); return; }
+      const payload = parseLastJsonLine<{ code?: string; message?: string; phase?: string }>(stdout) ??
+                      parseLastJsonLine<{ code?: string; message?: string; phase?: string }>(stderr);
+      const msg = payload?.message ?? (stderr.trim() || stdout.trim() || 'Telegram command failed.');
+      const errCode = payload?.code ?? 'TELEGRAM_UNAVAILABLE';
+      reject(new TelegramBridgeError(errCode, msg, null, { phase: payload?.phase ?? null }));
     });
   });
 }
 
-async function runBridgeCommand<T>(args: string[], timeoutMs = 30_000): Promise<T> {
+async function runScript<T>(args: string[], timeoutMs = 30_000): Promise<T> {
   if (!isBridgeScriptPresent()) {
     throw new TelegramBridgeError(
       'SCRIPT_NOT_FOUND',
@@ -428,374 +347,36 @@ async function runBridgeCommand<T>(args: string[], timeoutMs = 30_000): Promise<
   }
 
   const specs = resolvedPythonSpec ? [resolvedPythonSpec] : PYTHON_CANDIDATES;
-  let lastError: unknown = null;
+  let lastErr: unknown = null;
 
   for (const spec of specs) {
     try {
-      const result = await tryRunPythonCommand(spec, args, timeoutMs);
-      resolvedPythonSpec = result.spec;
-      console.log(`[Telegram] using python: ${spec.label}`);
+      const raw = await spawnScript(spec, args, timeoutMs);
+      resolvedPythonSpec = spec;
+      console.log(`[telegram] using python: ${spec.label}`);
 
-      const payload = parseJsonLine<T>(result.stdout.trim().split('\n').filter(Boolean).at(-1) ?? '');
+      const payload = parseLastJsonLine<T>(raw);
       if (!payload) {
-        throw new TelegramBridgeError('TELEGRAM_UNAVAILABLE', result.stderr.trim() || 'Telegram bridge returned invalid JSON.');
+        throw new TelegramBridgeError('TELEGRAM_UNAVAILABLE', 'Telegram bridge returned invalid JSON.');
       }
-
       return payload;
-    } catch (error) {
-      lastError = error;
-      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
-      throw error;
+    } catch (err) {
+      lastErr = err;
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
+      throw err;
     }
   }
 
-  if (lastError instanceof Error) throw lastError;
-  throw new TelegramBridgeError('PYTHON_NOT_FOUND', 'Python was not found. Install Python 3 or set TELEGRAM_PYTHON_PATH.');
+  if (lastErr instanceof Error) throw lastErr;
+  throw new TelegramBridgeError('PYTHON_NOT_FOUND', 'Python not found. Install Python 3 or set TELEGRAM_PYTHON_PATH.');
 }
 
-function applyConnectionFailure(error: TelegramBridgeError | Error) {
-  runtimeState.connected = false;
-  runtimeState.loggedIn = error instanceof TelegramBridgeError ? error.loginOk : false;
-  runtimeState.targetChatAccessible = false;
-  runtimeState.targetChatResolved = error instanceof TelegramBridgeError ? error.targetChatResolved : false;
-  runtimeState.canReadMessages = error instanceof TelegramBridgeError ? error.canReadMessages : false;
-  runtimeState.messagesFetched = 0;
-  runtimeState.error = error.message;
-  runtimeState.stack = error instanceof TelegramBridgeError ? error.stackDetails : error.stack;
-  runtimeState.code = error instanceof TelegramBridgeError ? error.code : 'TELEGRAM_UNAVAILABLE';
-  runtimeState.currentPhase = error instanceof TelegramBridgeError ? error.phase : null;
-  runtimeState.errorPhase = error instanceof TelegramBridgeError ? error.phase : null;
-  runtimeState.operation = error instanceof TelegramBridgeError ? error.operation : null;
-  runtimeState.hints = error instanceof TelegramBridgeError ? error.hints : [];
-  runtimeState.account = error instanceof TelegramBridgeError ? error.account : runtimeState.account;
-  runtimeState.accountUsername = error instanceof TelegramBridgeError ? error.account?.username ?? error.account?.displayName ?? runtimeState.accountUsername : runtimeState.accountUsername;
-  runtimeState.targetChatTitle = error instanceof TelegramBridgeError ? error.targetChatInfo?.title ?? runtimeState.targetChatTitle : runtimeState.targetChatTitle;
-  runtimeState.targetChatType = error instanceof TelegramBridgeError ? error.targetChatInfo?.type ?? runtimeState.targetChatType : runtimeState.targetChatType;
-}
-
-function updateBaseState() {
-  const config = getTelegramEnvConfig();
-  runtimeState.enabled = config.enabled;
-  runtimeState.configured = config.configured;
-  runtimeState.targetChat = config.targetChat;
-  if (config.error) {
-    runtimeState.error = config.error;
-    runtimeState.stack = null;
-    runtimeState.code = 'MISSING_CREDENTIALS';
-    runtimeState.currentPhase = 'load_session';
-    runtimeState.errorPhase = 'load_session';
-    runtimeState.hints = ['Configura TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION o TELEGRAM_SESSION_FILE, y TELEGRAM_TARGET_CHAT.'];
-  } else if (!config.enabled) {
-    runtimeState.error = null;
-    runtimeState.stack = null;
-    runtimeState.code = null;
-    runtimeState.currentPhase = null;
-    runtimeState.errorPhase = null;
-    runtimeState.hints = [];
-  }
-}
-
-function logBridgeFailure(prefix: string, error: TelegramBridgeError | Error) {
-  const payload = error instanceof TelegramBridgeError
-    ? {
-        phase: error.phase,
-        operation: error.operation,
-        targetChat: error.targetChat,
-        loginOk: error.loginOk,
-        targetChatResolved: error.targetChatResolved,
-        canReadMessages: error.canReadMessages,
-        account: error.account,
-        targetChatInfo: error.targetChatInfo,
-        hints: error.hints,
-        name: error.errorName ?? error.name,
-        message: error.message,
-        code: error.code,
-        stack: error.stackDetails ?? error.stack,
-        details: error.details,
-      }
-    : {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      };
-  console.error(prefix, payload);
-}
-
-function maskSession(value: string | null) {
-  if (!value) return null;
-  if (value.length <= 10) return 'configured';
-  return `${value.slice(0, 6)}...${value.slice(-4)}`;
-}
-
-export async function logTelegramStartupDiagnostics() {
-  updateBaseState();
-  const config = getTelegramEnvConfig();
-  const preferredPython = process.env.TELEGRAM_PYTHON_PATH?.trim()
-    || process.env.TELEGRAM_PYTHON_BIN?.trim()
-    || process.env.PYTHON_EXECUTABLE?.trim()
-    || null;
-
-  const scriptPresent = isBridgeScriptPresent();
-
-  console.log('[Telegram] Startup config', {
-    enabled: config.enabled,
-    configured: config.configured,
-    apiIdConfigured: Boolean(config.apiId),
-    apiHashConfigured: Boolean(config.apiHash),
-    sessionConfigured: Boolean(config.session),
-    sessionSource: config.sessionSource,
-    sessionFile: config.sessionFile,
-    sessionName: config.sessionName,
-    targetChatConfigured: Boolean(config.targetChat),
-    targetChat: config.targetChat,
-    scriptPath: TELEGRAM_BRIDGE_SCRIPT,
-    scriptPresent,
-    pythonCandidates: PYTHON_CANDIDATES.map((s) => s.label),
-    resolvedPython: resolvedPythonSpec?.label ?? null,
-    preferredPython,
-    workingDirectory: process.cwd(),
-    renderService: process.env.RENDER_SERVICE_NAME ?? null,
-    renderInstance: process.env.RENDER_INSTANCE_ID ?? null,
-    renderUrl: process.env.RENDER_EXTERNAL_URL ?? null,
-    sessionPreview: maskSession(config.session),
-  });
-
-  if (!scriptPresent) {
-    runtimeState.error = `Telegram bridge script not found: ${TELEGRAM_BRIDGE_SCRIPT}. Telegram sync is disabled. Create the script or set TELEGRAM_PYTHON_SCRIPT env var.`;
-    runtimeState.code = 'SCRIPT_NOT_FOUND';
-    console.warn(`[Telegram] Bridge script not found at ${TELEGRAM_BRIDGE_SCRIPT} — Telegram disabled. Set TELEGRAM_PYTHON_SCRIPT to override the path.`);
-    return;
-  }
-
-  try {
-    const doctor = await runBridgeCommand<DoctorCommandSuccess>(['doctor', '--json']);
-    console.log('[Telegram] Python bridge diagnostics', doctor);
-  } catch (error) {
-    const bridgeError = error instanceof TelegramBridgeError
-      ? error
-      : new TelegramBridgeError('TELEGRAM_UNAVAILABLE', error instanceof Error ? error.message : 'Telegram doctor failed.');
-    logBridgeFailure('[Telegram] Python bridge diagnostics failed:', bridgeError);
-  }
-}
-
-function scheduleMonitorRestart(onMessage: (message: TelegramBridgeMessagePayload) => Promise<void>) {
-  if (intentionalMonitorStop || monitorRestartTimer || !runtimeState.configured) return;
-  // Do not restart if the script is permanently missing — avoids an infinite loop.
-  if (runtimeState.code === 'SCRIPT_NOT_FOUND') return;
-
-  monitorRestartTimer = setTimeout(() => {
-    monitorRestartTimer = null;
-    void startTelegramMonitoring(onMessage);
-  }, 5_000);
-}
-
-function handleMonitorEvent(event: MonitorEvent, onMessage: (message: TelegramBridgeMessagePayload) => Promise<void>) {
-  if (event.event === 'status') {
-    runtimeState.currentPhase = event.phase ?? null;
-    runtimeState.error = null;
-    runtimeState.stack = null;
-    runtimeState.code = null;
-
-    if (event.stage === 'session_loaded') {
-      console.log('[Telegram] Session loaded', {
-        source: event.sessionSource ?? 'unknown',
-        sessionFile: event.sessionFile ?? null,
-      });
-      return;
-    }
-
-    if (event.stage === 'connecting') {
-      console.log('[Telegram] Connecting to Telegram...');
-      return;
-    }
-
-    if (event.stage === 'logged_in') {
-      runtimeState.connected = true;
-      runtimeState.loggedIn = event.loginOk ?? true;
-      runtimeState.accountUsername = event.username ?? event.displayName ?? null;
-      runtimeState.account = event.account ?? null;
-      console.log('[Telegram] Logged in successfully');
-      if (event.username || event.displayName) {
-        console.log(`[Telegram] Account: ${event.username ? `@${event.username}` : event.displayName}`);
-      }
-      return;
-    }
-
-    if (event.stage === 'resolving_target_chat') {
-      console.log(`[Telegram] Resolving target chat: ${event.targetChat ?? runtimeState.targetChat ?? 'unknown'}`);
-      return;
-    }
-
-    if (event.stage === 'target_chat_connected') {
-      runtimeState.targetChatAccessible = true;
-      runtimeState.targetChatResolved = true;
-      runtimeState.targetChat = event.chatId ?? runtimeState.targetChat;
-      runtimeState.targetChatTitle = event.chatTitle ?? null;
-      runtimeState.targetChatType = event.chatType ?? null;
-      console.log(`[Telegram] Target chat resolved: ${event.chatTitle ?? event.chatId ?? 'Unknown chat'}`);
-      if (event.chatType) {
-        console.log(`[Telegram] Chat type: ${event.chatType}`);
-      }
-      if (event.chatId) {
-        console.log(`[Telegram] Target chat ID: ${event.chatId}`);
-      }
-      return;
-    }
-
-    if (event.stage === 'reading_messages') {
-      console.log('[Telegram] Validating channel read access...');
-      return;
-    }
-
-    if (event.stage === 'message_read_test_ok') {
-      runtimeState.canReadMessages = event.canReadMessages ?? true;
-      runtimeState.lastMessageDate = event.lastMessageDate ?? null;
-      console.log(`[Telegram] Permissions: read_messages=${runtimeState.canReadMessages ? 'true' : 'false'}`);
-      console.log('[Telegram] Message read test OK');
-      if (event.lastMessageDate) {
-        console.log(`[Telegram] Last message date: ${event.lastMessageDate}`);
-      }
-      return;
-    }
-
-    if (event.stage === 'monitoring_enabled') {
-      console.log('[Telegram] Read-only ingestion enabled');
-    }
-
-    return;
-  }
-
-  if (event.event === 'warning') {
-    runtimeState.connected = false;
-    runtimeState.loggedIn = event.loginOk ?? false;
-    runtimeState.targetChatAccessible = false;
-    runtimeState.targetChatResolved = event.targetChatResolved ?? false;
-    runtimeState.canReadMessages = event.canReadMessages ?? false;
-    runtimeState.currentPhase = event.phase ?? null;
-    runtimeState.error = event.message ?? 'Telegram monitor warning';
-    runtimeState.code = event.code ?? 'TELEGRAM_WARNING';
-    runtimeState.errorPhase = event.phase ?? null;
-    runtimeState.operation = event.operation ?? null;
-    runtimeState.hints = event.hints ?? [];
-    console.warn('[Telegram] Warning:', {
-      phase: event.phase,
-      operation: event.operation,
-      targetChat: event.targetChat ?? runtimeState.targetChat,
-      message: runtimeState.error,
-      code: runtimeState.code,
-      hints: runtimeState.hints,
-    });
-    return;
-  }
-
-  if (event.event === 'error') {
-    runtimeState.connected = false;
-    runtimeState.loggedIn = event.loginOk ?? false;
-    runtimeState.targetChatAccessible = false;
-    runtimeState.targetChatResolved = event.targetChatResolved ?? false;
-    runtimeState.canReadMessages = event.canReadMessages ?? false;
-    runtimeState.currentPhase = event.phase ?? null;
-    runtimeState.error = event.message ?? 'Telegram monitor error';
-    runtimeState.code = event.code ?? 'TELEGRAM_UNAVAILABLE';
-    runtimeState.errorPhase = event.phase ?? null;
-    runtimeState.operation = event.operation ?? null;
-    runtimeState.hints = event.hints ?? [];
-    runtimeState.account = event.account ?? runtimeState.account;
-    runtimeState.targetChatTitle = event.targetChatInfo?.title ?? runtimeState.targetChatTitle;
-    runtimeState.targetChatType = event.targetChatInfo?.type ?? runtimeState.targetChatType;
-    runtimeState.stack = event.stack ?? null;
-    console.error('[Telegram] Operation failed:', {
-      phase: event.phase,
-      operation: event.operation,
-      targetChat: event.targetChat ?? runtimeState.targetChat,
-      account: event.account,
-      resolvedChat: event.targetChatInfo,
-      loginOk: event.loginOk,
-      targetChatResolved: event.targetChatResolved,
-      canReadMessages: event.canReadMessages,
-      name: event.errorName,
-      message: event.message,
-      code: event.code ?? event.errorCode,
-      stack: event.stack,
-      raw: event.details,
-      hints: event.hints,
-    });
-    return;
-  }
-
-  if (event.event === 'message') {
-    runtimeState.lastSyncAt = new Date().toISOString();
-    runtimeState.lastProcessedMessageId = event.message.telegramMessageId;
-    runtimeState.messagesFetched += 1;
-    void onMessage(event.message).catch((error) => {
-      console.error('[Telegram] Failed to persist incoming message:', error instanceof Error ? error.message : 'Unknown error');
-    });
-  }
-}
-
-function spawnMonitorProcess(spec: PythonSpec, handlers: MonitorHandlers) {
-  const child = spawn(spec.cmd, [...spec.cmdArgs, TELEGRAM_BRIDGE_SCRIPT, 'monitor'], {
-    cwd: process.cwd(),
-    env: process.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  const stdoutInterface = readline.createInterface({ input: child.stdout });
-  const stderrInterface = readline.createInterface({ input: child.stderr });
-
-  stdoutInterface.on('line', (line) => {
-    const event = parseJsonLine<MonitorEvent | BridgeErrorPayload>(line);
-    if (!event) return;
-
-    if ('ok' in event && event.ok === false) {
-      handlers.onEvent({
-        event: 'error',
-        code: event.code,
-        message: event.message,
-        details: event.details ?? null,
-      });
-      return;
-    }
-
-    handlers.onEvent(event as MonitorEvent);
-  });
-
-  stderrInterface.on('line', (line) => {
-    if (!line.trim()) return;
-    console.error(`[Telegram] ${line.trim()}`);
-  });
-
-  child.on('error', (error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') {
-      handlers.onEvent({
-        event: 'error',
-        code: 'PYTHON_NOT_FOUND',
-        message: `Python executable "${spec.label}" was not found.`,
-        details: error.message,
-      });
-      handlers.onExit({ code: 127, signal: null });
-      return;
-    }
-
-    handlers.onEvent({
-      event: 'error',
-      code: 'TELEGRAM_UNAVAILABLE',
-      message: error.message,
-      details: null,
-    });
-  });
-
-  child.on('close', (code, signal) => {
-    stdoutInterface.close();
-    stderrInterface.close();
-    handlers.onExit({ code, signal });
-  });
-
-  return child;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function getTelegramRuntimeState() {
-  updateBaseState();
+  syncBaseState();
   return { ...runtimeState };
 }
 
@@ -812,9 +393,6 @@ export function getTelegramScriptDiagnostics() {
     phase = 'TELEGRAM_NOT_CONFIGURED';
   }
 
-  console.log(`[telegram] selected python: ${resolvedPythonSpec?.label ?? 'none'}`);
-  console.log(`[telegram] target chat: ${config.targetChat ?? 'not set'}`);
-
   return {
     configured: runtimeState.configured,
     available: runtimeState.connected,
@@ -824,249 +402,261 @@ export function getTelegramScriptDiagnostics() {
     checkedScriptPaths: TELEGRAM_CHECKED_SCRIPT_PATHS,
     targetChat: config.targetChat ?? null,
     resolvedChat: runtimeState.targetChatTitle ?? null,
-    lastError: scriptPresent ? runtimeState.error : `Telegram bridge script not found. Checked: ${TELEGRAM_CHECKED_SCRIPT_PATHS.join(', ')}`,
+    lastError: scriptPresent
+      ? runtimeState.error
+      : `Telegram bridge script not found. Checked: ${TELEGRAM_CHECKED_SCRIPT_PATHS.join(', ')}`,
   };
 }
 
+export async function logTelegramStartupDiagnostics() {
+  syncBaseState();
+  const config = getTelegramEnvConfig();
+  const scriptPresent = isBridgeScriptPresent();
+
+  console.log('[telegram] Startup config', {
+    enabled: config.enabled,
+    configured: config.configured,
+    apiIdConfigured: Boolean(config.apiId),
+    apiHashConfigured: Boolean(config.apiHash),
+    sessionConfigured: Boolean(config.session),
+    targetChat: config.targetChat,
+    scriptPath: TELEGRAM_BRIDGE_SCRIPT,
+    scriptPresent,
+    pythonCandidates: PYTHON_CANDIDATES.map((s) => s.label),
+    workingDirectory: process.cwd(),
+  });
+
+  if (!scriptPresent) {
+    runtimeState.error = `Bridge script not found: ${TELEGRAM_BRIDGE_SCRIPT}`;
+    runtimeState.code = 'SCRIPT_NOT_FOUND';
+    console.warn(`[telegram] Bridge script not found at ${TELEGRAM_BRIDGE_SCRIPT}`);
+    console.warn(`[telegram] Set TELEGRAM_BRIDGE_SCRIPT_PATH to override, or create the script at one of:`, TELEGRAM_CHECKED_SCRIPT_PATHS);
+    return;
+  }
+
+  console.log(`[telegram] using script: ${TELEGRAM_BRIDGE_SCRIPT}`);
+  console.log(`[telegram] target chat: ${config.targetChat ?? 'not set'}`);
+
+  try {
+    const doctor = await runScript<Record<string, unknown>>(['doctor'], 15_000);
+    console.log('[telegram] Python bridge diagnostics', doctor);
+  } catch (err) {
+    console.warn('[telegram] doctor check failed:', err instanceof Error ? err.message : String(err));
+  }
+}
+
 export async function testTelegramConnection(): Promise<TelegramConnectionTestResult> {
-  updateBaseState();
+  syncBaseState();
   const config = getTelegramEnvConfig();
 
   if (!config.enabled) {
-    return {
-      enabled: false,
-      connected: false,
-      loggedIn: false,
-      targetChatAccessible: false,
-      targetChatResolved: false,
-      canReadMessages: false,
-      messagesFetched: 0,
-      currentPhase: 'load_session',
-      lastMessageDate: null,
-      account: null,
-      targetChat: null,
-      error: 'Telegram is not configured.',
-      code: 'MISSING_CREDENTIALS',
-      errorPhase: 'load_session',
-      errorMessage: 'Telegram is not configured.',
-      stack: null,
-      hints: ['Configura TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION o TELEGRAM_SESSION_FILE, y TELEGRAM_TARGET_CHAT.'],
-    };
+    return _notConfiguredResult('Telegram is not configured.', 'MISSING_CREDENTIALS');
+  }
+  if (!config.configured) {
+    return _notConfiguredResult(config.error ?? 'Telegram credentials incomplete.', 'MISSING_CREDENTIALS', true);
   }
 
-  if (!config.configured) {
-    return {
-      enabled: true,
-      connected: false,
-      loggedIn: false,
-      targetChatAccessible: false,
-      targetChatResolved: false,
-      canReadMessages: false,
-      messagesFetched: 0,
-      currentPhase: 'load_session',
-      lastMessageDate: null,
-      account: null,
-      targetChat: null,
-      error: config.error,
-      code: 'MISSING_CREDENTIALS',
-      errorPhase: 'load_session',
-      errorMessage: config.error,
-      stack: null,
-      hints: ['Revisa las variables de entorno de Telegram.'],
-    };
-  }
+  type TestResult = {
+    ok: boolean;
+    phase: string;
+    authorized?: boolean;
+    chatResolved?: boolean;
+    chatId?: string;
+    chatTitle?: string;
+    username?: string;
+    message?: string;
+    code?: string;
+  };
 
   try {
-    const result = await runBridgeCommand<TestCommandSuccess>(['test', '--json']);
-    runtimeState.connected = result.connected;
-    runtimeState.loggedIn = result.loggedIn ?? result.connected;
-    runtimeState.targetChatAccessible = result.target_chat_accessible;
-    runtimeState.targetChatResolved = result.target_chat_resolved ?? result.target_chat_accessible;
-    runtimeState.canReadMessages = result.can_read_messages ?? result.target_chat_accessible;
-    runtimeState.messagesFetched = 0;
-    runtimeState.lastMessageDate = result.last_message_date ?? null;
-    runtimeState.targetChatTitle = result.target_chat?.title ?? null;
-    runtimeState.targetChatType = result.target_chat?.type ?? null;
-    runtimeState.account = result.account ?? null;
-    runtimeState.accountUsername = result.account?.username ?? result.account?.displayName ?? null;
+    const result = await runScript<TestResult>(['test'], 30_000);
+    console.log(`[telegram] selected python: ${resolvedPythonSpec?.label ?? 'none'}`);
+    console.log(`[telegram] target chat: ${config.targetChat ?? 'not set'}`);
+
+    if (!result.ok) {
+      const errCode = result.code ?? result.phase ?? 'TELEGRAM_UNAVAILABLE';
+      runtimeState.connected = false;
+      runtimeState.loggedIn = false;
+      runtimeState.error = result.message ?? 'Connection failed.';
+      runtimeState.code = errCode;
+      runtimeState.currentPhase = result.phase ?? null;
+      runtimeState.errorPhase = result.phase ?? null;
+      return _failedResult(result.message ?? 'Connection failed.', errCode, result.phase ?? null);
+    }
+
+    runtimeState.connected = result.authorized === true;
+    runtimeState.loggedIn = result.authorized === true;
+    runtimeState.targetChatResolved = result.chatResolved === true;
+    runtimeState.targetChatAccessible = result.chatResolved === true;
+    runtimeState.canReadMessages = result.chatResolved === true;
+    runtimeState.targetChatTitle = result.chatTitle ?? null;
+    runtimeState.targetChat = result.chatId ?? config.targetChat;
+    runtimeState.accountUsername = result.username ?? null;
     runtimeState.error = null;
-    runtimeState.stack = null;
     runtimeState.code = null;
-    runtimeState.currentPhase = result.current_phase ?? 'frontend_response';
+    runtimeState.currentPhase = 'CONNECTED';
     runtimeState.errorPhase = null;
-    runtimeState.operation = null;
-    runtimeState.hints = result.hints ?? [];
 
     return {
       enabled: true,
-      connected: result.connected,
-      loggedIn: result.loggedIn ?? result.connected,
-      targetChatAccessible: result.target_chat_accessible,
-      targetChatResolved: result.target_chat_resolved ?? result.target_chat_accessible,
-      canReadMessages: result.can_read_messages ?? result.target_chat_accessible,
+      connected: true,
+      loggedIn: true,
+      targetChatAccessible: result.chatResolved === true,
+      targetChatResolved: result.chatResolved === true,
+      canReadMessages: result.chatResolved === true,
       messagesFetched: 0,
-      currentPhase: result.current_phase ?? 'frontend_response',
-      lastMessageDate: result.last_message_date ?? null,
-      account: {
-        id: result.account?.id ?? null,
-        username: result.account?.username ?? null,
-        displayName: result.account?.displayName ?? null,
-      },
-      targetChat: {
-        id: result.target_chat?.id ?? null,
-        title: result.target_chat?.title ?? null,
-        type: result.target_chat?.type ?? null,
-        username: result.target_chat?.username ?? null,
-        normalized: result.target_chat?.normalized ?? null,
-      },
+      currentPhase: 'CONNECTED',
+      lastMessageDate: null,
+      account: result.username ? { id: null, username: result.username, displayName: result.username } : null,
+      targetChat: result.chatResolved
+        ? { id: result.chatId ?? null, title: result.chatTitle ?? null, type: null }
+        : null,
       error: null,
       code: null,
       errorPhase: null,
       errorMessage: null,
       stack: null,
-      hints: result.hints ?? [],
+      hints: [],
     };
-  } catch (error) {
-    const bridgeError = error instanceof TelegramBridgeError
-      ? error
-      : new TelegramBridgeError('TELEGRAM_UNAVAILABLE', error instanceof Error ? error.message : 'Telegram unavailable.');
-    logBridgeFailure('[Telegram] Connection test failed:', bridgeError);
-    applyConnectionFailure(bridgeError);
-    return {
-      enabled: true,
-      connected: false,
-      loggedIn: bridgeError.loginOk,
-      targetChatAccessible: false,
-      targetChatResolved: bridgeError.targetChatResolved,
-      canReadMessages: bridgeError.canReadMessages,
-      messagesFetched: 0,
-      currentPhase: bridgeError.phase,
-      lastMessageDate: null,
-      account: bridgeError.account?.id && bridgeError.account?.username && bridgeError.account?.displayName
-        ? { id: bridgeError.account.id, username: bridgeError.account.username, displayName: bridgeError.account.displayName }
-        : null,
-      targetChat: {
-        id: bridgeError.targetChatInfo?.id ?? null,
-        title: bridgeError.targetChatInfo?.title ?? null,
-        type: bridgeError.targetChatInfo?.type ?? null,
-        username: bridgeError.targetChatInfo?.username ?? null,
-        normalized: bridgeError.targetChatInfo?.normalized ?? null,
-      },
-      error: bridgeError.message,
-      code: bridgeError.code,
-      errorPhase: bridgeError.phase,
-      errorMessage: bridgeError.message,
-      stack: bridgeError.stackDetails,
-      hints: bridgeError.hints,
-    };
+  } catch (err) {
+    const bridgeErr = err instanceof TelegramBridgeError
+      ? err
+      : new TelegramBridgeError('TELEGRAM_UNAVAILABLE', err instanceof Error ? err.message : 'Connection test failed.');
+    runtimeState.connected = false;
+    runtimeState.loggedIn = false;
+    runtimeState.error = bridgeErr.message;
+    runtimeState.code = bridgeErr.code;
+    runtimeState.currentPhase = bridgeErr.phase;
+    runtimeState.errorPhase = bridgeErr.phase;
+    return _failedResult(bridgeErr.message, bridgeErr.code, bridgeErr.phase);
   }
 }
 
-export async function fetchTelegramHistory(limit: number, afterId?: string | null) {
-  updateBaseState();
-  const args = ['fetch-history', '--json', '--limit', String(limit)];
-  if (afterId) args.push('--after-id', afterId);
-  runtimeState.currentPhase = 'fetch_messages';
-  console.log('[Telegram] Fetching latest messages...');
+type FetchHistorySuccess = {
+  ok: true;
+  chat?: { id: string | null; title: string | null; type: string | null };
+  messages?: TelegramBridgeMessagePayload[];
+  messages_fetched?: number;
+  loggedIn?: boolean;
+  target_chat_resolved?: boolean;
+  can_read_messages?: boolean;
+  last_message_date?: string | null;
+  hints?: string[] | null;
+};
 
-  try {
-    const result = await runBridgeCommand<FetchHistorySuccess>(args, 20_000);
-    runtimeState.connected = true;
-    runtimeState.loggedIn = result.loggedIn ?? runtimeState.loggedIn;
-    runtimeState.targetChatResolved = result.target_chat_resolved ?? Boolean(result.chat);
-    runtimeState.targetChatAccessible = runtimeState.targetChatResolved;
-    runtimeState.canReadMessages = result.can_read_messages ?? runtimeState.canReadMessages;
-    runtimeState.targetChatTitle = result.chat?.title ?? runtimeState.targetChatTitle;
-    runtimeState.targetChatType = result.chat?.type ?? runtimeState.targetChatType;
-    runtimeState.lastMessageDate = result.last_message_date ?? runtimeState.lastMessageDate;
-    runtimeState.messagesFetched = result.messages_fetched ?? result.messages?.length ?? 0;
-    runtimeState.error = null;
-    runtimeState.stack = null;
-    runtimeState.code = null;
-    runtimeState.errorPhase = null;
-    runtimeState.operation = null;
-    runtimeState.hints = result.hints ?? [];
-    runtimeState.currentPhase = 'frontend_response';
-    console.log(`[Telegram] Messages fetched: ${runtimeState.messagesFetched}`);
-    return result;
-  } catch (error) {
-    const bridgeError = error instanceof TelegramBridgeError
-      ? error
-      : new TelegramBridgeError('TELEGRAM_UNAVAILABLE', error instanceof Error ? error.message : 'Telegram fetch failed.');
-    logBridgeFailure('[Telegram] Fetch history failed:', bridgeError);
-    applyConnectionFailure(bridgeError);
-    throw bridgeError;
-  }
-}
-
-export async function startTelegramMonitoring(onMessage: (message: TelegramBridgeMessagePayload) => Promise<void>) {
-  updateBaseState();
+export async function fetchTelegramHistory(limit: number, _afterId?: string | null): Promise<FetchHistorySuccess> {
+  syncBaseState();
   const config = getTelegramEnvConfig();
+  const clampedLimit = Math.min(Math.max(limit, 1), 10);
 
-  if (!config.enabled) return;
-  if (!config.configured) {
-    console.warn(`[Telegram] ${config.error}`);
-    return;
+  type FetchResult = {
+    ok: boolean;
+    phase?: string;
+    chatId?: string;
+    messagesFetched?: number;
+    messages?: Array<{ messageId: string; text: string; sentAt: string }>;
+    limitSignals?: TelegramLimitSignal[];
+    limitSignalsFound?: number;
+    message?: string;
+    code?: string;
+  };
+
+  console.log('[telegram] starting sync');
+  console.log(`[telegram] target chat: ${config.targetChat ?? 'not set'}`);
+
+  const result = await runScript<FetchResult>(['fetch-latest'], 45_000);
+  console.log(`[telegram] using python: ${resolvedPythonSpec?.label ?? 'none'}`);
+  console.log(`[telegram] using script: ${TELEGRAM_BRIDGE_SCRIPT}`);
+
+  if (!result.ok) {
+    throw new TelegramBridgeError(
+      result.code ?? result.phase ?? 'TELEGRAM_UNAVAILABLE',
+      result.message ?? 'Fetch failed.',
+      null,
+      { phase: result.phase ?? null },
+    );
   }
 
-  // Hard-stop if the Python bridge script is missing — do NOT schedule restarts.
-  if (!isBridgeScriptPresent()) {
-    runtimeState.error = `Telegram bridge script not found: ${TELEGRAM_BRIDGE_SCRIPT}. Telegram sync disabled. Create the script or set TELEGRAM_PYTHON_SCRIPT env var.`;
-    runtimeState.code = 'SCRIPT_NOT_FOUND';
-    console.warn(`[Telegram] Bridge script not found: ${TELEGRAM_BRIDGE_SCRIPT}. Monitoring will not start.`);
-    return;
-  }
+  const chatId = result.chatId ?? config.targetChat ?? '';
+  const rawMsgs = result.messages ?? [];
+  const msgCount = result.messagesFetched ?? rawMsgs.length;
+  const lastDate = rawMsgs[0]?.sentAt ?? null;
 
-  if (monitorProcess) return;
+  console.log(`[telegram] fetched latest messages count=${msgCount}`);
+  console.log(`[telegram] limit signals found=${result.limitSignalsFound ?? 0}`);
 
-  intentionalMonitorStop = false;
+  runtimeState.connected = true;
+  runtimeState.loggedIn = true;
+  runtimeState.targetChatResolved = true;
+  runtimeState.targetChatAccessible = true;
+  runtimeState.canReadMessages = true;
+  runtimeState.messagesFetched = msgCount;
+  runtimeState.lastMessageDate = lastDate;
+  runtimeState.lastSyncAt = new Date().toISOString();
+  runtimeState.error = null;
+  runtimeState.code = null;
+  runtimeState.currentPhase = 'CONNECTED';
+  runtimeState.errorPhase = null;
 
-  const specs = resolvedPythonSpec ? [resolvedPythonSpec] : PYTHON_CANDIDATES;
-  let started = false;
+  console.log('[telegram] sync completed');
 
-  for (const spec of specs) {
-    try {
-      monitorProcess = spawnMonitorProcess(spec, {
-        onEvent: (event) => handleMonitorEvent(event, onMessage),
-        onExit: ({ code, signal }) => {
-          monitorProcess = null;
-          if (intentionalMonitorStop) return;
-          runtimeState.connected = false;
-          runtimeState.targetChatAccessible = false;
-          if (code !== 0) {
-            console.warn(`[Telegram] Monitor exited with code ${code ?? 'unknown'}${signal ? ` (${signal})` : ''}. Retrying...`);
-          }
-          scheduleMonitorRestart(onMessage);
-        },
-      });
-      resolvedPythonSpec = spec;
-      console.log(`[Telegram] script=${TELEGRAM_BRIDGE_SCRIPT} python=${spec.label} target=${config.targetChat ?? 'not set'}`);
-      started = true;
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
-      throw error;
-    }
-  }
+  const messages: TelegramBridgeMessagePayload[] = rawMsgs.map((m) => ({
+    telegramMessageId: m.messageId,
+    chatId,
+    chatTitle: null,
+    senderId: null,
+    senderName: null,
+    text: m.text,
+    rawText: m.text,
+    replyInfo: null,
+    telegramDate: m.sentAt,
+    attachments: [],
+  }));
 
-  if (!started) {
-    runtimeState.error = 'Python was not found. Install Python 3 or set TELEGRAM_PYTHON_PATH.';
-    runtimeState.code = 'PYTHON_NOT_FOUND';
-    console.error(`[Telegram] Python not found. Tried: ${PYTHON_CANDIDATES.map((s) => s.label).join(', ')}`);
-  }
+  return {
+    ok: true,
+    chat: { id: chatId, title: null, type: null },
+    messages,
+    messages_fetched: msgCount,
+    loggedIn: true,
+    target_chat_resolved: true,
+    can_read_messages: true,
+    last_message_date: lastDate,
+    hints: [],
+  };
 }
 
-export function stopTelegramMonitoring() {
-  intentionalMonitorStop = true;
-  if (monitorRestartTimer) {
-    clearTimeout(monitorRestartTimer);
-    monitorRestartTimer = null;
+/** Fetch latest messages and return only the XAUUSD/GOLD limit signals. */
+export async function fetchLatestLimitSignals(): Promise<TelegramLimitSignal[]> {
+  type FetchResult = {
+    ok: boolean;
+    phase?: string;
+    message?: string;
+    code?: string;
+    limitSignals?: TelegramLimitSignal[];
+  };
+
+  const result = await runScript<FetchResult>(['fetch-latest'], 45_000);
+  if (!result.ok) {
+    throw new TelegramBridgeError(
+      result.code ?? result.phase ?? 'TELEGRAM_UNAVAILABLE',
+      result.message ?? 'Fetch failed.',
+      null,
+      { phase: result.phase ?? null },
+    );
   }
-  if (monitorProcess) {
-    monitorProcess.kill('SIGTERM');
-    monitorProcess = null;
-  }
+  return result.limitSignals ?? [];
 }
+
+// No-op: the persistent monitor process is removed. Syncing is handled by the
+// scheduled syncTelegramSignals() calls via telegramSyncScheduler.service.ts.
+export function startTelegramMonitoring(
+  _onMessage: (message: TelegramBridgeMessagePayload) => Promise<void>,
+): void {
+  console.log('[telegram] persistent monitor disabled — using scheduled sync instead');
+}
+
+export function stopTelegramMonitoring(): void { /* no-op */ }
 
 export async function runTelegramDoctor(): Promise<{
   python_found: boolean;
@@ -1075,37 +665,28 @@ export async function runTelegramDoctor(): Promise<{
   script_exists: boolean;
   script_path: string;
   env_vars: Record<string, boolean>;
-  doctor: DoctorCommandSuccess | null;
+  doctor: Record<string, unknown> | null;
   doctor_error: string | null;
   error_code: string | null;
   raw_stderr: string | null;
 }> {
-  const scriptPath = TELEGRAM_BRIDGE_SCRIPT;
+  const scriptExists = isBridgeScriptPresent();
+  const envVarKeys = ['TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'TELEGRAM_SESSION', 'TELEGRAM_TARGET_CHAT', 'TELEGRAM_SESSION_FILE'];
+  const envVars = Object.fromEntries(envVarKeys.map((k) => [k, Boolean(process.env[k]?.trim())]));
 
-  // Check script exists
-  let scriptExists = false;
-  try {
-    const { existsSync } = await import('node:fs');
-    scriptExists = existsSync(scriptPath);
-  } catch { /* ignore */ }
-
-  // Check python availability and version — try each candidate until one works
   let pythonFound = false;
   let pythonVersion: string | null = null;
   let pythonExecutable: string | null = null;
+
   for (const spec of PYTHON_CANDIDATES) {
-    const result = spawnSync(spec.cmd, [...spec.cmdArgs, '--version'], { encoding: 'utf8', timeout: 5000 });
-    if (result.error == null && result.status === 0) {
+    const r = spawnSync(spec.cmd, [...spec.cmdArgs, '--version'], { encoding: 'utf8', timeout: 5000 });
+    if (r.error == null && r.status === 0) {
       pythonFound = true;
-      pythonVersion = (result.stdout || result.stderr || '').trim().split('\n')[0] ?? null;
+      pythonVersion = (r.stdout || r.stderr || '').trim().split('\n')[0] ?? null;
       pythonExecutable = spec.label;
       break;
     }
   }
-
-  // Check env var presence (no values)
-  const envVarKeys = ['TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'TELEGRAM_SESSION', 'TELEGRAM_TARGET_CHAT', 'TELEGRAM_SESSION_FILE'];
-  const envVars = Object.fromEntries(envVarKeys.map((k) => [k, Boolean(process.env[k]?.trim())]));
 
   if (!pythonFound || !scriptExists) {
     return {
@@ -1113,7 +694,7 @@ export async function runTelegramDoctor(): Promise<{
       python_version: pythonVersion,
       python_executable: pythonExecutable,
       script_exists: scriptExists,
-      script_path: scriptPath,
+      script_path: TELEGRAM_BRIDGE_SCRIPT,
       env_vars: envVars,
       doctor: null,
       doctor_error: pythonFound ? 'Bridge script not found' : 'Python not found',
@@ -1122,39 +703,75 @@ export async function runTelegramDoctor(): Promise<{
     };
   }
 
-  // Run doctor command via the first working candidate
-  const docSpec = PYTHON_CANDIDATES.find((s) => {
-    const r = spawnSync(s.cmd, [...s.cmdArgs, '--version'], { encoding: 'utf8', timeout: 3000 });
-    return r.error == null && r.status === 0;
-  }) ?? { cmd: 'python3', cmdArgs: [], label: 'python3' };
   try {
-    const result = await tryRunPythonCommand(docSpec, ['doctor', '--json'], 15_000);
-    const doctor = parseJsonLine<DoctorCommandSuccess>(result.stdout.trim().split('\n').reverse().find(Boolean) ?? '');
-    return {
-      python_found: true,
-      python_version: pythonVersion,
-      python_executable: pythonExecutable,
-      script_exists: scriptExists,
-      script_path: scriptPath,
-      env_vars: envVars,
-      doctor,
-      doctor_error: null,
-      error_code: null,
-      raw_stderr: result.stderr.trim() || null,
-    };
-  } catch (error) {
-    const bridgeError = error instanceof TelegramBridgeError ? error : null;
-    return {
-      python_found: true,
-      python_version: pythonVersion,
-      python_executable: pythonExecutable,
-      script_exists: scriptExists,
-      script_path: scriptPath,
-      env_vars: envVars,
-      doctor: null,
-      doctor_error: error instanceof Error ? error.message : String(error),
-      error_code: bridgeError?.code ?? 'DOCTOR_FAILED',
-      raw_stderr: null,
-    };
+    const raw = await spawnScript(
+      PYTHON_CANDIDATES.find((s) => {
+        const r = spawnSync(s.cmd, [...s.cmdArgs, '--version'], { encoding: 'utf8', timeout: 3000 });
+        return r.error == null && r.status === 0;
+      }) ?? { cmd: 'python3', cmdArgs: [], label: 'python3' },
+      ['doctor'],
+      15_000,
+    );
+    const doctor = parseLastJsonLine<Record<string, unknown>>(raw);
+    return { python_found: true, python_version: pythonVersion, python_executable: pythonExecutable, script_exists: true, script_path: TELEGRAM_BRIDGE_SCRIPT, env_vars: envVars, doctor, doctor_error: null, error_code: null, raw_stderr: null };
+  } catch (err) {
+    const bridgeErr = err instanceof TelegramBridgeError ? err : null;
+    return { python_found: true, python_version: pythonVersion, python_executable: pythonExecutable, script_exists: true, script_path: TELEGRAM_BRIDGE_SCRIPT, env_vars: envVars, doctor: null, doctor_error: err instanceof Error ? err.message : String(err), error_code: bridgeErr?.code ?? 'DOCTOR_FAILED', raw_stderr: null };
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Private result builders
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _notConfiguredResult(
+  errorMsg: string | null,
+  code: string,
+  enabled = false,
+): TelegramConnectionTestResult {
+  return {
+    enabled,
+    connected: false,
+    loggedIn: false,
+    targetChatAccessible: false,
+    targetChatResolved: false,
+    canReadMessages: false,
+    messagesFetched: 0,
+    currentPhase: 'load_session',
+    lastMessageDate: null,
+    account: null,
+    targetChat: null,
+    error: errorMsg,
+    code,
+    errorPhase: 'load_session',
+    errorMessage: errorMsg,
+    stack: null,
+    hints: ['Configure TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION, and TELEGRAM_TARGET_CHAT.'],
+  };
+}
+
+function _failedResult(
+  message: string,
+  code: string,
+  phase: string | null,
+): TelegramConnectionTestResult {
+  return {
+    enabled: true,
+    connected: false,
+    loggedIn: false,
+    targetChatAccessible: false,
+    targetChatResolved: false,
+    canReadMessages: false,
+    messagesFetched: 0,
+    currentPhase: phase,
+    lastMessageDate: null,
+    account: null,
+    targetChat: null,
+    error: message,
+    code,
+    errorPhase: phase,
+    errorMessage: message,
+    stack: null,
+    hints: [],
+  };
 }

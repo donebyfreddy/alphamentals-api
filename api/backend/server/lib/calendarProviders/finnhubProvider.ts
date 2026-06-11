@@ -1,5 +1,6 @@
 import * as cache from '../cache.js';
 import type { CalendarProvider, NormalizedCalendarEvent, EventImpact } from './types.js';
+import { CalendarProviderError } from './diagnostics.js';
 
 const BASE = 'https://finnhub.io/api/v1';
 
@@ -69,7 +70,13 @@ export class FinnhubProvider implements CalendarProvider {
 
   async fetchEvents(from: string, to: string): Promise<NormalizedCalendarEvent[]> {
     const apiKey = process.env.FINNHUB_API_KEY;
-    if (!apiKey) throw new Error('FINNHUB_API_KEY not set in .env');
+    if (!apiKey || !apiKey.trim()) {
+      throw new CalendarProviderError('FINNHUB_FORBIDDEN_OR_INVALID_KEY', {
+        code: 'FINNHUB_FORBIDDEN_OR_INVALID_KEY',
+        status: 403,
+        checkedUrl: null,
+      });
+    }
 
     const cacheKey = `finnhub:calendar:${from}:${to}`;
     const cached = cache.get<NormalizedCalendarEvent[]>(cacheKey);
@@ -77,7 +84,20 @@ export class FinnhubProvider implements CalendarProvider {
 
     const url = `${BASE}/calendar/economic?from=${from}&to=${to}&token=${apiKey}`;
     const res = await fetch(url, { headers: { 'X-Finnhub-Token': apiKey } });
-    if (!res.ok) throw new Error(`Finnhub error: ${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      if (res.status === 403 || res.status === 401) {
+        throw new CalendarProviderError('FINNHUB_FORBIDDEN_OR_INVALID_KEY', {
+          code: 'FINNHUB_FORBIDDEN_OR_INVALID_KEY',
+          status: res.status,
+          checkedUrl: url.replace(/token=[^&]+/, 'token=REDACTED'),
+        });
+      }
+      throw new CalendarProviderError(`Finnhub error: ${res.status} ${res.statusText}`, {
+        code: 'FINNHUB_CALENDAR_FETCH_FAILED',
+        status: res.status,
+        checkedUrl: url.replace(/token=[^&]+/, 'token=REDACTED'),
+      });
+    }
 
     const data = (await res.json()) as FinnhubCalendarResponse;
     const raw = data.economicCalendar ?? [];

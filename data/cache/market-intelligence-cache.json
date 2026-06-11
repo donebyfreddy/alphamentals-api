@@ -1,0 +1,671 @@
+{
+  "market-news": {
+    "value": [
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Silver price hits multi‑month low as Fed hike expectations, safe-haven demand weigh",
+        "summary": "Silver (XAG/USD) extends its bearish move on Thursday and trades around $63.00, down 0.58% on the day at the time of writing.",
+        "url": "https://www.fxstreet.com/news/silver-price-hits-multi-month-low-as-fed-hike-expectations-safe-haven-demand-weigh-202606111305",
+        "publishedAt": "2026-06-11T13:05:16.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD",
+          "US30"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Canadian Dollar: Growth outlook steady with soft GDP – RBC",
+        "summary": "Royal Bank of Canada (RBC) economist Claire Fan notes that Canada’s Gross Domestic Product (GDP) contracted in Q1, but measures of excess slack such as the unemployment rate still align with prior tracking. Fan keeps its growth outlook unchanged, instead lowering potential GDP estimates.",
+        "url": "https://www.fxstreet.com/news/canadian-dollar-growth-outlook-steady-with-soft-gdp-rbc-202606111304",
+        "publishedAt": "2026-06-11T13:04:23.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "low",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Lagarde speech: Conflict is weighing on activity",
+        "summary": "Christine Lagarde, President of the European Central Bank (ECB), explains the ECB's decision to raise key rates by 25 basis points at the June policy meeting and responds to questions from the press.",
+        "url": "https://www.fxstreet.com/news/lagarde-speech-conflict-is-weighing-on-activity-202606111259",
+        "publishedAt": "2026-06-11T12:59:48.000Z",
+        "symbols": [
+          "EURUSD"
+        ],
+        "currencies": [
+          "EUR"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Oil: Chinese demand and US exports shape balance – ING",
+        "summary": "ING’s Warren Patterson notes that weaker Chinese crude imports and strong US exports have temporarily eased pressure on Oil, but he stresses these supports are not sustainable. China’s May 2026 crude imports fell sharply, while higher US exports are being drawn from inventories.",
+        "url": "https://www.fxstreet.com/news/oil-chinese-demand-and-us-exports-shape-balance-ing-202606111253",
+        "publishedAt": "2026-06-11T12:53:44.000Z",
+        "symbols": [],
+        "currencies": [],
+        "impact": "low",
+        "sentiment": "bullish",
+        "category": "macro",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "ECB Press Conference: Lagarde speaks on policy outlook after raising rates in June",
+        "summary": "Christine Lagarde, President of the European Central Bank (ECB), explains the ECB's decision to raise key rates by 25 basis points at the June policy meeting and responds to questions from the press.",
+        "url": "https://www.fxstreet.com/news/european-central-bank-set-to-hike-interest-rates-for-first-time-in-nearly-three-years-202606110700",
+        "publishedAt": "2026-06-11T12:46:40.000Z",
+        "symbols": [
+          "EURUSD"
+        ],
+        "currencies": [
+          "EUR"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Swiss Franc: FX intervention focus – Nomura",
+        "summary": "Nomura’s European economics team expects the SNB to keep emphasising an elevated willingness to intervene in FX markets, despite recent CHF depreciation against EUR.",
+        "url": "https://www.fxstreet.com/news/swiss-franc-fx-intervention-focus-nomura-202606111242",
+        "publishedAt": "2026-06-11T12:42:07.000Z",
+        "symbols": [
+          "EURUSD"
+        ],
+        "currencies": [
+          "EUR"
+        ],
+        "impact": "low",
+        "sentiment": "neutral",
+        "category": "macro",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "United States producer inflation jumps to 6.5% in May, highest since November 2022",
+        "summary": "Producer inflation in the United States (US) as measured by the change in the Producer Price Index (PPI), climbed to its highest level since November 2022 at 6.5% in May, from 5.7% in April, the US Bureau of Labor Statistics reported on Thursday.",
+        "url": "https://www.fxstreet.com/news/united-states-producer-inflation-jumps-to-65-in-may-highest-since-november-2022-202606111241",
+        "publishedAt": "2026-06-11T12:41:54.000Z",
+        "symbols": [],
+        "currencies": [],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "macro",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Gold falls to YTD low as higher-for-longer interest rate outlook weighs",
+        "summary": "Gold (XAU/USD) slides to a six-month low on Thursday, wiping out all the gains recorded this year as a combination of hawkish central bank expectations and technical selling keeps buyers on the sidelines.",
+        "url": "https://www.fxstreet.com/news/gold-falls-to-ytd-low-as-higher-for-longer-interest-rate-outlook-weighs-202606111233",
+        "publishedAt": "2026-06-11T12:33:17.000Z",
+        "symbols": [
+          "XAUUSD",
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY"
+        ],
+        "currencies": [
+          "XAU",
+          "USD"
+        ],
+        "impact": "medium",
+        "sentiment": "bearish",
+        "category": "commodities",
+        "aiRelevanceScore": 0.65
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Japanese Yen: Limited impact from BoJ leadership absence – BBH",
+        "summary": "Brown Brothers Harriman’s (BBH) Elias Haddad notes USD/JPY is trading tightly around 160.50, just below its late-April pre-intervention high, with a 25 bps Bank of Japan (BoJ) rate hike to 1.00% already fully priced.",
+        "url": "https://www.fxstreet.com/news/japanese-yen-limited-impact-from-boj-leadership-absence-bbh-202606111228",
+        "publishedAt": "2026-06-11T12:28:30.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD",
+          "JPY"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "US President Trump: Will be hitting Iran very hard tonight",
+        "summary": "\"The United States will be hitting Iran (Whose Navy, Air Force, Radar, Anti Aircraft, and all other forms of Defense, together with most of its offensive capability, are GONE!), VERY HARD TONIGHT,\" US President Donald Trump posted on Truth Social on Thursday and added:",
+        "url": "https://www.fxstreet.com/news/us-president-trump-will-be-hitting-iran-very-hard-tonight-202606111227",
+        "publishedAt": "2026-06-11T12:27:34.000Z",
+        "symbols": [],
+        "currencies": [],
+        "impact": "low",
+        "sentiment": "neutral",
+        "category": "macro",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Indian Rupee: RBI measures draw foreign inflows – Societe Generale",
+        "summary": "Societe Generale strategists report that recent RBI steps to attract foreign portfolio investors are already easing Indian bond yields, with the five‑year segment outperforming.",
+        "url": "https://www.fxstreet.com/news/indian-rupee-rbi-measures-draw-foreign-inflows-societe-generale-202606111212",
+        "publishedAt": "2026-06-11T12:12:56.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "medium",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.65
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Australian Dollar: Gradual grind lower toward 0.6975 – UOB",
+        "summary": "United Overseas Bank’s (UOB) Quek Ser Leang and Lee Sue Ann maintain a negative stance on AUD/USD after the pair closed below 0.7000, though downside momentum is still described as modest. Intraday, they look for further slippage but doubts a clean break of 0.6975.",
+        "url": "https://www.fxstreet.com/news/australian-dollar-gradual-grind-lower-toward-06975-uob-202606111152",
+        "publishedAt": "2026-06-11T11:52:41.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD",
+          "US30"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "low",
+        "sentiment": "neutral",
+        "category": "equities",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "WTI Price Forecast: 20-day EMA remains key hurdle",
+        "summary": "West Texas Intermediate (WTI), futures on NYMEX, trade almost 3% lower to near $87.60 during the European trading session on Thursday.",
+        "url": "https://www.fxstreet.com/news/wti-price-forecast-20-day-ema-remains-key-hurdle-202606111141",
+        "publishedAt": "2026-06-11T11:41:40.000Z",
+        "symbols": [
+          "EURUSD"
+        ],
+        "currencies": [
+          "EUR"
+        ],
+        "impact": "low",
+        "sentiment": "neutral",
+        "category": "macro",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "European Central Bank: Summer hikes seen as insurance – ING",
+        "summary": "ING’s Carsten Brzeski argues that the European Central Bank is being guided by its 2022 inflation experience rather than current data, with headline Eurozone inflation still moderate and survey-based expectations easing.",
+        "url": "https://www.fxstreet.com/news/european-central-bank-summer-hikes-seen-as-insurance-ing-202606111136",
+        "publishedAt": "2026-06-11T11:36:13.000Z",
+        "symbols": [
+          "EURUSD"
+        ],
+        "currencies": [
+          "EUR"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Euro treads water near two-month lows ahead of the ECB decision",
+        "summary": "The Euro (EUR) has given away previous gains against the US Dollar (USD) on Thursday and is trading at 1.1535 at the time of writing, practically unchanged in daily charts with the two-month lows, near 1.1500, at hand.",
+        "url": "https://www.fxstreet.com/news/euro-might-extend-losses-if-the-ecb-delivers-a-dovish-hike-202606110720",
+        "publishedAt": "2026-06-11T11:35:35.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD",
+          "EUR"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Canadian Dollar: Seen converging to 1.38 against US Dollar – TD Securities",
+        "summary": "The Global Strategy Team at TD Securities reports that the Bank of Canada left rates unchanged at 2.25% and maintained a balanced tone. They expect the Bank to hold policy through 2026, with the next hike projected for early 2027.",
+        "url": "https://www.fxstreet.com/news/canadian-dollar-seen-converging-to-138-against-us-dollar-td-securities-202606111128",
+        "publishedAt": "2026-06-11T11:28:02.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "low",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Canadian Dollar edges lower as safe-haven demand, policy divergence underpin US Dollar",
+        "summary": "USD/CAD advances toward 1.3975 on Thursday at the time of writing, up 0.23% on the day, with the US Dollar (USD) benefiting from renewed safe-haven demand amid persistent tensions in the Middle East.",
+        "url": "https://www.fxstreet.com/news/canadian-dollar-edges-lower-as-safe-haven-demand-policy-divergence-underpin-us-dollar-202606111127",
+        "publishedAt": "2026-06-11T11:27:42.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "low",
+        "sentiment": "neutral",
+        "category": "macro",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "US Dollar: Firm tone with sticky inflation – BBH",
+        "summary": "Brown Brothers Harriman’s (BBH) Elias Haddad notes the US Dollar (USD) is firm as United States (US) data show stalled disinflation and sticky inflation measures drifting away from the Federal Reserve’s (Fed) 2% target.",
+        "url": "https://www.fxstreet.com/news/us-dollar-firm-tone-with-sticky-inflation-bbh-202606111115",
+        "publishedAt": "2026-06-11T11:15:59.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Euro: Limited upside against US Dollar on fully priced ECB – ING",
+        "summary": "ING’s Chris Turner argues that with a 25bp ECB hike and further tightening already priced, the Euro faces a high bar for gains. Markets discount about 75bp of tightening through early next year.",
+        "url": "https://www.fxstreet.com/news/euro-limited-upside-against-us-dollar-on-fully-priced-ecb-ing-202606111108",
+        "publishedAt": "2026-06-11T11:08:03.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD",
+          "EUR"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Indian Rupee slumps amid concerns over sustainability of US-Iran ceasefire",
+        "summary": "The Indian Rupee (INR) tumbles at open against the US Dollar (USD) on Thursday, with the USD/INR pair rising to near 95.75. The pair gains as a sharp recovery in oil prices due to fears surrounding the collapse of the ceasefire between the United States (US) and Iran has weakened the Indian Rupee.",
+        "url": "https://www.fxstreet.com/news/indian-rupee-slumps-as-oil-price-surges-amid-fears-of-us-iran-ceasefire-collapse-202606110502",
+        "publishedAt": "2026-06-11T11:04:28.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "low",
+        "sentiment": "bearish",
+        "category": "macro",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "British Pound trades with caution ahead of UK monthly GDP data",
+        "summary": "The British Pound (GBP) trades cautiously against its major currency peers during the European trading session on Thursday, down 0.1% to near 1.3350 against the US Dollar (USD).",
+        "url": "https://www.fxstreet.com/news/british-pound-trades-with-caution-ahead-of-uk-monthly-gdp-data-202606111055",
+        "publishedAt": "2026-06-11T10:55:59.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD",
+          "US30"
+        ],
+        "currencies": [
+          "USD",
+          "EUR",
+          "GBP"
+        ],
+        "impact": "low",
+        "sentiment": "neutral",
+        "category": "equities",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Gold Price Forecast: XAU/USD attempts to bounce up from the $4,000 psychological area",
+        "summary": "Gold (XAU/USD) trades with minor gains on Thursday but remains struggling below $4,100, amid geopolitical uncertainty and rising bets on Federal Reserve (Fed) rate hikes.",
+        "url": "https://www.fxstreet.com/news/gold-price-forecast-xau-usd-attempts-to-bounce-up-from-the-4-000-psychological-area-202606111049",
+        "publishedAt": "2026-06-11T10:49:50.000Z",
+        "symbols": [
+          "XAUUSD",
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY"
+        ],
+        "currencies": [
+          "XAU",
+          "USD"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "commodities",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuaW52ZXN0",
+        "source": "investing",
+        "title": "+10% yesterday, can this improbable winner keep rising amid June’s rollercoaster?",
+        "summary": "+10% yesterday, can this improbable winner keep rising amid June’s rollercoaster?. Extracted from Investing.com via Playwright fallback.",
+        "url": "https://www.investing.com/news/stock-market-news/10-yesterday-can-this-improbable-winner-keep-rising-amid-junes-rollercoaster-4737514",
+        "publishedAt": "2026-06-11 12:31:46",
+        "symbols": [],
+        "currencies": [],
+        "impact": "low",
+        "sentiment": "bearish",
+        "category": "macro",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuaW52ZXN0",
+        "source": "investing",
+        "title": "Oil turns higher after Trump says to hit Iran ’very hard’ and target Kharg Island",
+        "summary": "Oil turns higher after Trump says to hit Iran ’very hard’ and target Kharg Island. Extracted from Investing.com via Playwright fallback.",
+        "url": "https://www.investing.com/news/commodities-news/oil-extends-climb-after-new-us-strikes-on-iran-hormuz-tensions-intensify-4736417",
+        "publishedAt": "2026-06-11 12:31:46",
+        "symbols": [],
+        "currencies": [],
+        "impact": "low",
+        "sentiment": "bearish",
+        "category": "macro",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuaW52ZXN0",
+        "source": "investing",
+        "title": "U.S.-Iran strikes; Oracle reports; ECB decision - what’s moving markets",
+        "summary": "U.S.-Iran strikes; Oracle reports; ECB decision - what’s moving markets. Extracted from Investing.com via Playwright fallback.",
+        "url": "https://www.investing.com/news/economy-news/usiran-strikes-oracle-reports-ecb-decision--whats-moving-markets-4736618",
+        "publishedAt": "2026-06-11 12:31:46",
+        "symbols": [
+          "EURUSD"
+        ],
+        "currencies": [
+          "EUR"
+        ],
+        "impact": "high",
+        "sentiment": "bearish",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuaW52ZXN0",
+        "source": "investing",
+        "title": "UBS now expects the Fed to begin its easing cycle in March 2027",
+        "summary": "UBS now expects the Fed to begin its easing cycle in March 2027. Extracted from Investing.com via Playwright fallback.",
+        "url": "https://www.investing.com/news/economy-news/ubs-now-expects-the-fed-to-begin-its-easing-cycle-in-march-2027-4736945",
+        "publishedAt": "2026-06-11 12:31:46",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "high",
+        "sentiment": "bearish",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Canadian Dollar: BoC caution limits gains against US Dollar – Commerzbank",
+        "summary": "Michael Pfister at Commerzbank notes the Bank of Canada (BoC) kept rates at 2.25% and sees little impetus for near-term tightening given easing core inflation and a weak real economy. Market pricing now reflects only one hike by December.",
+        "url": "https://www.fxstreet.com/news/canadian-dollar-boc-caution-limits-gains-against-us-dollar-commerzbank-202606111009",
+        "publishedAt": "2026-06-11T10:09:23.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "high",
+        "sentiment": "bearish",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Australian Dollar remains depressed near two-month lows in risk-off markets",
+        "summary": "The Australian Dollar (AUD) has given away previous gains and is trading lower for the third consecutive day against a stronger US Dollar (USD) on Thursday.",
+        "url": "https://www.fxstreet.com/news/australian-dollar-remains-depressed-near-two-month-lows-in-risk-off-markets-202606111008",
+        "publishedAt": "2026-06-11T10:08:24.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "medium",
+        "sentiment": "bullish",
+        "category": "macro",
+        "aiRelevanceScore": 0.65
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "US Dollar: Uptrend seen intact into FOMC – TD Securities",
+        "summary": "TD Securities strategists note that a softer core United Kingdom (UK) Consumer Price Index (CPI) print triggered initial US Dollar (USD) weakness, but they still expect the broad USD uptrend to remain supported into next week’s Federal Open Market Committee (FOMC) meeting.",
+        "url": "https://www.fxstreet.com/news/us-dollar-uptrend-seen-intact-into-fomc-td-securities-202606110957",
+        "publishedAt": "2026-06-11T09:57:54.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "high",
+        "sentiment": "bullish",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Bank of Canada: Policy hold as recession concerns linger – Rabobank",
+        "summary": "Rabobank’s Molly Schwartz and Christian Lawrence review the latest Bank of Canada (BoC) decision, noting policymakers kept the overnight rate at 2.25% in June. They highlight ongoing risks from high energy prices and prolonged inflation, alongside a technical recession.",
+        "url": "https://www.fxstreet.com/news/bank-of-canada-policy-hold-as-recession-concerns-linger-rabobank-202606110949",
+        "publishedAt": "2026-06-11T09:49:21.000Z",
+        "symbols": [],
+        "currencies": [],
+        "impact": "high",
+        "sentiment": "bearish",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Euro: Downside risk against US Dollar as ECB hikes – BBH",
+        "summary": "Brown Brothers Harriman’s (BBH) Elias Haddad highlights EUR/USD trading defensively near 1.1530 ahead of an expected 25 bps European Central Bank (ECB) rate hike to 2.25% and updated projections likely downgrading growth.",
+        "url": "https://www.fxstreet.com/news/euro-downside-risk-against-us-dollar-as-ecb-hikes-bbh-202606110940",
+        "publishedAt": "2026-06-11T09:40:49.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD",
+          "US30"
+        ],
+        "currencies": [
+          "USD",
+          "EUR"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Euro trades flat vs Yen as ECB guidance focus, intervention fears cap gains",
+        "summary": "EUR/JPY trades around 185.20 on Thursday at the time of writing, as market participants remain cautious ahead of the European Central Bank (ECB) monetary policy decision.",
+        "url": "https://www.fxstreet.com/news/euro-trades-flat-vs-yen-as-ecb-guidance-focus-intervention-fears-cap-gains-202606110939",
+        "publishedAt": "2026-06-11T09:39:21.000Z",
+        "symbols": [
+          "EURUSD",
+          "USDJPY"
+        ],
+        "currencies": [
+          "EUR",
+          "JPY"
+        ],
+        "impact": "high",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.85
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Silver price today: Silver rises, according to FXStreet data",
+        "summary": "Silver prices (XAG/USD) rose on Thursday, according to FXStreet data. Silver trades at $64.05 per troy ounce, up 1.05% from the $63.39 it cost on Wednesday.",
+        "url": "https://www.fxstreet.com/news/silver-price-today-silver-rises-according-to-fxstreet-data-202606110931",
+        "publishedAt": "2026-06-11T09:31:43.000Z",
+        "symbols": [
+          "EURUSD",
+          "GBPUSD",
+          "USDJPY",
+          "XAUUSD"
+        ],
+        "currencies": [
+          "USD"
+        ],
+        "impact": "low",
+        "sentiment": "bullish",
+        "category": "macro",
+        "aiRelevanceScore": 0.35
+      },
+      {
+        "id": "news_aHR0cHM6Ly93d3cuZnhzdHJl",
+        "source": "fxstreet",
+        "title": "Turkish Lira: Hawkish CBRT tone but lira risks ahead – ING",
+        "summary": "ING’s Frantisek Taborsky expects the Central Bank of Turkey (CBRT) to keep its policy rate at 37%, maintaining a tight stance and policy flexibility.",
+        "url": "https://www.fxstreet.com/news/turkish-lira-hawkish-cbrt-tone-but-lira-risks-ahead-ing-202606110930",
+        "publishedAt": "2026-06-11T09:30:24.000Z",
+        "symbols": [],
+        "currencies": [],
+        "impact": "medium",
+        "sentiment": "neutral",
+        "category": "central-bank",
+        "aiRelevanceScore": 0.65
+      }
+    ],
+    "expiresAt": 1781184869631,
+    "updatedAt": "2026-06-11T13:24:29.631Z"
+  },
+  "economic-calendar": {
+    "value": [],
+    "expiresAt": 1781184731440,
+    "updatedAt": "2026-06-11T13:17:11.440Z"
+  }
+}

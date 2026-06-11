@@ -388,21 +388,17 @@ async function performMt5Sync(credentials: MetaTraderCredentials): Promise<Mt5Sy
   const userId = DEFAULT_USER_ID;
   if (!userId) throw new Error('DEFAULT_USER_ID is not configured. Set DEFAULT_USER_ID in your .env file.');
 
-  if (!process.env.METAAPI_TOKEN) {
-    throw new Error('METAAPI_TOKEN is not set. MetaApi cloud connection requires a valid token in your .env file.');
-  }
-
   console.log(`[MT5 Sync] Starting sync for account ${credentials.login} on server ${credentials.server}`);
   await ensureTradeImportColumns();
   const result = await connectMetaTrader(credentials);
 
   if (!result.success) {
-    const errMsg = result.error?.message ?? 'MetaApi connection failed without a specific error message.';
+    const errMsg = result.error?.message ?? 'Local MT5 bridge connection failed without a specific error message.';
     const errCode = result.error?.code ?? 'UNKNOWN';
-    console.error(`[MT5 Sync] MetaApi connection failed. code=${errCode} message=${errMsg}`);
-    throw new Error(`MetaApi sync failed [${errCode}]: ${errMsg}`);
+    console.error(`[MT5 Sync] Local bridge connection failed. code=${errCode} message=${errMsg}`);
+    throw new Error(`MT5 sync failed [${errCode}]: ${errMsg}`);
   }
-  if (!result.account) throw new Error('MetaApi returned success but no account snapshot — unexpected response.');
+  if (!result.account) throw new Error('MT5 bridge returned success but no account snapshot — unexpected response.');
   const linkedAccount = await getOrCreateLinkedAccount(userId, result.account, credentials);
   const openTrades = normalizeOpenPositions(result.positions ?? []);
   const closedTrades = normalizeClosedTrades(result.history ?? []);
@@ -579,10 +575,6 @@ export async function getRecentTrades(limit = 5) {
 export function scheduleAutomaticMt5Sync() {
   const credentials = getConfiguredMt5Credentials();
 
-  if (!process.env.METAAPI_TOKEN) {
-    console.warn('[MT5 Sync] METAAPI_TOKEN not set — automatic MT5 sync disabled.');
-    return;
-  }
   if (!DEFAULT_USER_ID) {
     console.warn('[MT5 Sync] DEFAULT_USER_ID not set — automatic MT5 sync disabled.');
     return;
@@ -592,7 +584,7 @@ export function scheduleAutomaticMt5Sync() {
     return;
   }
 
-  console.log(`[MT5 Sync] Scheduling automatic sync for account ${credentials.login} every ${AUTO_SYNC_INTERVAL_MS / 1000}s.`);
+  console.log(`[MT5 Sync] Scheduling automatic sync via local Windows VPS MT5 bridge for account ${credentials.login} every ${AUTO_SYNC_INTERVAL_MS / 1000}s.`);
 
   setImmediate(() => {
     void syncMt5AccountNow();

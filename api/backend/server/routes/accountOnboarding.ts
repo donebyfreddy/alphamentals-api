@@ -97,20 +97,20 @@ function bridgeServiceStatus(now: string) {
   });
 }
 
-function metaApiServiceStatus(result: MetaTraderConnectResult, now: string) {
+function terminalServiceStatus(result: MetaTraderConnectResult, now: string) {
   if (result.success) {
     return serviceStatus({
       state: 'connected',
-      label: 'MetaApi Connected',
-      message: 'MetaApi account deployment and terminal connectivity succeeded.',
+      label: 'Terminal Connected',
+      message: 'Windows VPS MetaTrader 5 terminal connectivity succeeded.',
       updatedAt: now,
     });
   }
 
   return serviceStatus({
     state: 'error',
-    label: 'MetaApi Error',
-    message: result.error?.message ?? 'MetaApi onboarding failed.',
+    label: 'Terminal Error',
+    message: result.error?.message ?? 'MT5 onboarding failed.',
     updatedAt: now,
   });
 }
@@ -134,16 +134,16 @@ function buildExistingAccountProcessSteps(params: {
   const steps: OnboardingProcessStep[] = [
     { key: 'credentials', label: 'Credentials sent securely to VPS', status: 'completed' },
     {
-      key: 'metaapi',
-      label: 'VPS creates or connects a MetaApi account',
+      key: 'bridge',
+      label: 'VPS connects the local Windows MT5 bridge',
       status: params.success ? 'completed' : 'failed',
-      detail: params.success ? 'MetaApi account is ready.' : errorDetail,
+      detail: params.success ? 'Local MT5 bridge is ready.' : errorDetail,
     },
     {
-      key: 'bridge',
-      label: 'VPS deploys the MT5 bridge connection',
+      key: 'session',
+      label: 'VPS opens the broker terminal session',
       status: params.success ? 'completed' : 'failed',
-      detail: params.success ? 'Bridge connection deployed.' : errorDetail,
+      detail: params.success ? 'Broker terminal session connected.' : errorDetail,
     },
     {
       key: 'terminal',
@@ -196,7 +196,7 @@ accountOnboardingRouter.post('/mt5/connect-existing', async (req, res) => {
   });
   const quoteFeed = await getQuoteFeedStatus();
   const bridgeStatus = bridgeServiceStatus(now);
-  const metaApiStatus = metaApiServiceStatus(connectResult, now);
+  const terminalStatus = terminalServiceStatus(connectResult, now);
   const heartbeatStatus = heartbeatServiceStatus(connectResult.success, now, connectResult.error?.message);
   const process = buildExistingAccountProcessSteps({
     success: connectResult.success,
@@ -212,7 +212,7 @@ accountOnboardingRouter.post('/mt5/connect-existing', async (req, res) => {
       process,
       diagnostics: {
         bridgeStatus,
-        metaApiStatus,
+        terminalStatus,
         quoteFeedStatus: quoteFeed,
         heartbeatStatus,
       },
@@ -245,7 +245,7 @@ accountOnboardingRouter.post('/mt5/connect-existing', async (req, res) => {
     },
     diagnostics: {
       bridgeStatus,
-      metaApiStatus,
+      terminalStatus,
       quoteFeedStatus: quoteFeed,
       heartbeatStatus,
     },
@@ -283,7 +283,7 @@ accountOnboardingRouter.post('/mt5/create-demo', async (req, res) => {
       ],
       diagnostics: {
         bridgeStatus: bridgeServiceStatus(new Date().toISOString()),
-        metaApiStatus: serviceStatus({ state: 'unavailable', label: 'MetaApi Unavailable', message: 'Demo broker onboarding endpoint is not configured.' }),
+        terminalStatus: serviceStatus({ state: 'unavailable', label: 'Terminal Unavailable', message: 'Demo broker onboarding endpoint is not configured.' }),
         quoteFeedStatus: await getQuoteFeedStatus(),
         heartbeatStatus: serviceStatus({ state: 'unavailable', label: 'Heartbeat Missing', message: 'No demo account heartbeat until provisioning is configured.' }),
       },
@@ -328,7 +328,7 @@ accountOnboardingRouter.post('/mt5/create-demo', async (req, res) => {
       ],
       diagnostics: {
         bridgeStatus: bridgeServiceStatus(new Date().toISOString()),
-        metaApiStatus: serviceStatus({ state: 'error', label: 'MetaApi Error', message: 'Failed to reach the VPS automation service.' }),
+        terminalStatus: serviceStatus({ state: 'error', label: 'Terminal Error', message: 'Failed to reach the VPS automation service.' }),
         quoteFeedStatus: await getQuoteFeedStatus(),
         heartbeatStatus: serviceStatus({ state: 'error', label: 'Heartbeat Missing', message: 'No provisioning heartbeat was returned.' }),
       },

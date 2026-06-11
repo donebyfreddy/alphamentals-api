@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { aggregateCosts, queryLedger } from '../lib/cost/ledger.js';
 import { getMonthlyFixedCost } from '../lib/cost/pricing.js';
-import { getTwelveDataCounters, getResendCounters, getMetaApiCounters } from '../lib/cost/counters.js';
+import { getTwelveDataCounters, getResendCounters } from '../lib/cost/counters.js';
 
 export const costRouter = Router();
 
@@ -9,11 +9,6 @@ type Range = 'today' | '7d' | '30d' | 'month';
 function parseRange(raw: unknown): Range {
   if (raw === 'today' || raw === '7d' || raw === '30d' || raw === 'month') return raw;
   return 'month';
-}
-
-function daysInCurrentMonth(): number {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
 }
 
 /**
@@ -39,16 +34,12 @@ costRouter.get('/summary', async (req, res) => {
       byFeature: mergeByKey([...openaiAgg.byFeature, ...anthropicAgg.byFeature], 'feature'),
     };
 
-    const metaApiMonthly  = getMonthlyFixedCost('METAAPI_MONTHLY_COST_USD');
     const tdMonthly       = getMonthlyFixedCost('TWELVE_DATA_MONTHLY_COST_USD');
     const resendMonthly   = getMonthlyFixedCost('RESEND_MONTHLY_COST_USD');
 
-    const days = daysInCurrentMonth();
     const tdCounters     = getTwelveDataCounters();
     const resendCounters = getResendCounters();
-    const metaApiCounters = getMetaApiCounters();
 
-    const metaApiCost   = metaApiMonthly ?? 0;
     const tdCost        = tdMonthly      ?? 0;
     const resendCost    = resendMonthly  ?? 0;
 
@@ -57,21 +48,23 @@ costRouter.get('/summary', async (req, res) => {
       range,
       totals: {
         aiCostUsd:         ai.costUsd,
-        metaApiCostUsd:    metaApiCost,
+        metaApiCostUsd:    0,
         marketDataCostUsd: tdCost,
         emailCostUsd:      resendCost,
-        totalCostUsd:      ai.costUsd + metaApiCost + tdCost + resendCost,
+        totalCostUsd:      ai.costUsd + tdCost + resendCost,
       },
       ai,
       metaApi: {
-        planName:       process.env.METAAPI_PLAN_NAME ?? null,
-        monthlyCostUsd: metaApiMonthly,
-        dailyEstimateUsd:  metaApiMonthly != null ? parseFloat((metaApiMonthly / days).toFixed(4)) : null,
-        weeklyEstimateUsd: metaApiMonthly != null ? parseFloat((metaApiMonthly / 4.345).toFixed(4)) : null,
-        syncCount:      metaApiCounters.requestCount,
-        failedSyncCount: metaApiCounters.failedCount,
-        lastSyncAt:     metaApiCounters.lastActivityAt,
-        configured:     metaApiMonthly != null,
+        planName:       null,
+        monthlyCostUsd: 0,
+        dailyEstimateUsd:  0,
+        weeklyEstimateUsd: 0,
+        syncCount:      0,
+        failedSyncCount: 0,
+        lastSyncAt:     null,
+        configured:     false,
+        enabled:        false,
+        message:        'MetaApi is disabled. This deployment uses Windows VPS MetaTrader 5 only.',
       },
       marketData: {
         provider:       'twelvedata',

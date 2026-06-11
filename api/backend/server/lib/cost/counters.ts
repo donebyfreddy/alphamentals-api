@@ -15,7 +15,6 @@ interface ProviderCounters {
 const store: Record<string, ProviderCounters> = {
   twelvedata: { requestCount: 0, failedCount: 0, lastActivityAt: null, symbolCounts: {} },
   resend:     { requestCount: 0, failedCount: 0, lastActivityAt: null, symbolCounts: {} },
-  metaapi:    { requestCount: 0, failedCount: 0, lastActivityAt: null, symbolCounts: {} },
 };
 
 function now() { return new Date().toISOString(); }
@@ -35,13 +34,5 @@ export function incrementResend(failed = false): void {
   c.lastActivityAt = now();
 }
 
-export function incrementMetaApi(failed = false): void {
-  const c = store.metaapi;
-  c.requestCount++;
-  if (failed) c.failedCount++;
-  c.lastActivityAt = now();
-}
-
 export function getTwelveDataCounters() { return { ...store.twelvedata }; }
 export function getResendCounters()     { return { ...store.resend };     }
-export function getMetaApiCounters()    { return { ...store.metaapi };    }

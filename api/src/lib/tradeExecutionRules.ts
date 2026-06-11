@@ -26,9 +26,9 @@ export interface TradeExecutionPlan {
   notes?: string | null;
   playbookChecks?: Record<string, boolean>;
   override?: { requested?: boolean; reason?: string | null };
-  account?: { id?: string | null; metaApiAccountId?: string; balance?: number; equity?: number; currency?: string; status?: string } | null;
+  account?: { id?: string | null; brokerAccountId?: string; balance?: number; equity?: number; currency?: string; status?: string } | null;
   marketGate?: {
-    isMetaApiConnected: boolean;
+    isExecutionBridgeConnected?: boolean;
     isBrokerHealthy: boolean;
     isMarketOpen?: boolean;
     [key: string]: unknown;

@@ -12,8 +12,8 @@ $ErrorActionPreference = "Stop"
 Write-Host "=== Alphamentals - INSTALL ===" -ForegroundColor Cyan
 Write-Host ""
 
-# [1/7] Node.js
-Write-Host "[1/7] Checking Node.js..." -ForegroundColor Yellow
+# [1/8] Node.js
+Write-Host "[1/8] Checking Node.js..." -ForegroundColor Yellow
 
 try {
     $nodeVersion = node --version 2>&1
@@ -25,8 +25,8 @@ catch {
     exit 1
 }
 
-# [2/7] Python 3.11 venv
-Write-Host "[2/7] Checking Python 3.11..." -ForegroundColor Yellow
+# [2/8] Python 3.11 venv
+Write-Host "[2/8] Checking Python 3.11..." -ForegroundColor Yellow
 
 $py311 = $null
 
@@ -61,7 +61,7 @@ if (-not $py311) {
     exit 1
 }
 
-Write-Host "[2/7] Creating Python 3.11 venv at mt5bridge\.venv..." -ForegroundColor Yellow
+Write-Host "[2/8] Creating Python 3.11 venv at mt5bridge\.venv..." -ForegroundColor Yellow
 
 if (Test-Path "mt5bridge\.venv") {
     Write-Host "  venv already exists, skipping creation." -ForegroundColor Green
@@ -82,7 +82,7 @@ else {
     Write-Host "  venv created." -ForegroundColor Green
 }
 
-Write-Host "[2/7] Installing Python requirements..." -ForegroundColor Yellow
+Write-Host "[2/8] Installing Python requirements..." -ForegroundColor Yellow
 
 if (-not (Test-Path "mt5bridge\requirements.txt")) {
     Write-Host "  ERROR: mt5bridge\requirements.txt not found." -ForegroundColor Red
@@ -103,8 +103,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "  Python requirements installed." -ForegroundColor Green
 
-# [3/7] npm install
-Write-Host "[3/7] Installing Node.js dependencies..." -ForegroundColor Yellow
+# [3/8] npm install
+Write-Host "[3/8] Installing Node.js dependencies..." -ForegroundColor Yellow
 
 npm install
 
@@ -115,8 +115,35 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "  npm install OK." -ForegroundColor Green
 
-# [4/7] PM2
-Write-Host "[4/7] Installing PM2..." -ForegroundColor Yellow
+# [4/8] Playwright
+Write-Host "[4/8] Installing Playwright browsers..." -ForegroundColor Yellow
+Write-Host "[Playwright] Installing browser dependencies..." -ForegroundColor Yellow
+
+npx playwright install
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "WARNING: Playwright browser installation failed." -ForegroundColor Yellow
+}
+else {
+    Write-Host "Playwright browsers installed." -ForegroundColor Green
+}
+
+$playwrightVersion = $null
+try {
+    $playwrightVersion = npx playwright --version 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  Playwright version: $playwrightVersion" -ForegroundColor Green
+    }
+    else {
+        Write-Host "  WARNING: Could not verify Playwright version." -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host "  WARNING: Playwright version check failed." -ForegroundColor Yellow
+}
+
+# [5/8] PM2
+Write-Host "[5/8] Installing PM2..." -ForegroundColor Yellow
 
 npm install -g pm2
 
@@ -133,8 +160,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "  PM2 installed." -ForegroundColor Green
 
-# [5/7] Build Node API
-Write-Host "[5/7] Building Node.js API..." -ForegroundColor Yellow
+# [6/8] Build Node API
+Write-Host "[6/8] Building Node.js API..." -ForegroundColor Yellow
 
 npm run build:api
 
@@ -145,8 +172,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "  Build OK." -ForegroundColor Green
 
-# [6/7] .env files
-Write-Host "[6/7] Checking .env files..." -ForegroundColor Yellow
+# [7/8] .env files
+Write-Host "[7/8] Checking .env files..." -ForegroundColor Yellow
 
 if (-not (Test-Path ".env")) {
     if (Test-Path ".env.example") {
@@ -177,9 +204,9 @@ else {
     Write-Host "  mt5bridge\.env already exists." -ForegroundColor Green
 }
 
-# [7/7] Windows Firewall - port 3001 only (port 8001 stays loopback-only)
+# [8/8] Windows Firewall - port 3001 only (port 8001 stays loopback-only)
 if (-not $SkipFirewall) {
-    Write-Host "[7/7] Opening Windows Firewall port 3001..." -ForegroundColor Yellow
+    Write-Host "[8/8] Opening Windows Firewall port 3001..." -ForegroundColor Yellow
 
     $ruleName = "Alphamentals API port 3001"
     $existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
@@ -201,7 +228,7 @@ if (-not $SkipFirewall) {
     Write-Host "  Port 8001 is NOT opened - bridge stays on 127.0.0.1 only." -ForegroundColor Cyan
 }
 else {
-    Write-Host "[7/7] Firewall step skipped." -ForegroundColor Yellow
+    Write-Host "[8/8] Firewall step skipped." -ForegroundColor Yellow
 }
 
 # PM2 Windows startup

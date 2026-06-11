@@ -1,4 +1,5 @@
 import * as cache from './cache.js';
+import { CalendarProviderError } from './calendarProviders/diagnostics.js';
 
 const BASE = 'https://www.myfxbook.com/api';
 
@@ -52,7 +53,20 @@ export async function fetchCalendar(
   const session = await login();
   const url = `${BASE}/get-economic-calendar.json?session=${session}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Myfxbook calendar fetch failed: ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new CalendarProviderError('MYFXBOOK_CALENDAR_ENDPOINT_NOT_FOUND', {
+        code: 'MYFXBOOK_CALENDAR_ENDPOINT_NOT_FOUND',
+        status: 404,
+        checkedUrl: url.replace(/session=[^&]+/, 'session=REDACTED'),
+      });
+    }
+    throw new CalendarProviderError(`Myfxbook calendar fetch failed: ${res.status}`, {
+      code: 'MYFXBOOK_CALENDAR_FETCH_FAILED',
+      status: res.status,
+      checkedUrl: url.replace(/session=[^&]+/, 'session=REDACTED'),
+    });
+  }
 
   const data = (await res.json()) as { error: boolean; message?: string; calendar?: RawCalendarEvent[] };
 

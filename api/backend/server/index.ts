@@ -44,9 +44,12 @@ import { costRouter } from './routes/cost.js';
 import { marketIntelligenceRouter } from './routes/marketIntelligence.js';
 import { adminRouter } from './routes/admin.js';
 import { pairAiRouter } from './routes/pairAi.js';
+import { systemRouter } from './routes/system.js';
+import { metaApiCompatRouter } from './routes/metaApiCompat.js';
 import { startMarketDataScheduler, validateMarketDataEnv } from '../../src/server/marketDataService.js';
 import { getBridgeConfigDiagnostics } from '../../src/server/mt5BridgeQuotes.js';
 import { logOpenAIConfiguration } from './lib/openaiConfig.js';
+import { getPlaywrightStatus } from './services/system/playwrightStatus.service.js';
 import {
   bootstrapMarketIntelligence,
   getFundamentalsPayload as getUnifiedFundamentalsPayload,
@@ -153,6 +156,9 @@ app.use('/api/debug', debugRouter);
 app.use('/api/ai-analysis', aiAnalysisRouter);
 app.use('/api/pair-ai', pairAiRouter);
 app.use('/api/cost', costRouter);
+app.use('/api/system', systemRouter);
+app.use('/api/metaapi', metaApiCompatRouter);
+app.use('/api/meta-api', metaApiCompatRouter);
 
 async function buildHealthPayload(port: number) {
   const telegram = getTelegramRuntimeState();
@@ -161,6 +167,14 @@ async function buildHealthPayload(port: number) {
     time: new Date().toISOString(),
     sourcesActive: 0,
     sourcesTotal: 12,
+  }));
+  const playwright = await getPlaywrightStatus().catch(() => ({
+    ok: true,
+    installed: false,
+    version: null,
+    chromium: false,
+    firefox: false,
+    webkit: false,
   }));
   return {
     ok: true,
@@ -174,6 +188,7 @@ async function buildHealthPayload(port: number) {
     host: HOST,
     port,
     timestamp: Date.now(),
+    playwright,
     telegram: {
       enabled: telegram.enabled,
       connected: telegram.connected,
@@ -310,6 +325,12 @@ async function bootstrap() {
     logOpenAIConfiguration();
     console.log(`[env] OPENAI_MODEL=${process.env.OPENAI_MODEL ?? 'gpt-4o-mini'}`);
     console.log(`[env] MYFXBOOK credentials detected: ${Boolean(process.env.MYFXBOOK_EMAIL && process.env.MYFXBOOK_PASSWORD)}`);
+    const playwright = await getPlaywrightStatus().catch(() => null);
+    if (playwright?.installed) {
+      console.log(`[playwright] installed=${playwright.installed} version=${playwright.version} chromium=${playwright.chromium} firefox=${playwright.firefox} webkit=${playwright.webkit}`);
+    } else {
+      console.warn('[playwright] not installed or unavailable - browser scraping features disabled, RSS/API fallbacks remain active');
+    }
 
     if (!process.env.MYFXBOOK_EMAIL) console.warn('[alphamentals-api] MYFXBOOK_EMAIL not set — demo calendar data will be used');
 

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../lib/supabase.js';
 import { createTrade } from './tradeJournal.service.js';
-import { getMetaApiAccountRuntimeStatus, placeMetaApiTradeOrder, type MetaApiTradeOrderRequest } from './metaTrader.service.js';
 import {
   DEFAULT_EXECUTION_SETTINGS,
   validateTradeExecutionPlan,
@@ -29,16 +28,8 @@ function isLiveExecutionEnabled(plan: TradeExecutionPlan) {
   return Boolean(
     plan.settings.liveExecutionEnabled &&
     !plan.settings.paperMode &&
-    process.env.ENABLE_METAAPI_LIVE_EXECUTION === 'true',
+    process.env.METAAPI_ENABLED === 'true',
   );
-}
-
-function toMetaApiActionType(plan: TradeExecutionPlan): MetaApiTradeOrderRequest['actionType'] {
-  if (plan.orderType === 'buy_limit') return 'ORDER_TYPE_BUY_LIMIT';
-  if (plan.orderType === 'sell_limit') return 'ORDER_TYPE_SELL_LIMIT';
-  if (plan.orderType === 'buy_stop') return 'ORDER_TYPE_BUY_STOP';
-  if (plan.orderType === 'sell_stop') return 'ORDER_TYPE_SELL_STOP';
-  return plan.direction === 'LONG' ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL';
 }
 
 async function findExistingByIdempotency(userId: string, key: string): Promise<ExecuteTradeResponse | null> {
@@ -123,32 +114,11 @@ export async function executeAccountableTrade(plan: TradeExecutionPlan): Promise
     settings: { ...DEFAULT_EXECUTION_SETTINGS, ...plan.settings },
   };
 
-  if (runtimePlan.account?.metaApiAccountId) {
-    try {
-      const metaStatus = await getMetaApiAccountRuntimeStatus(runtimePlan.account.metaApiAccountId);
-      runtimePlan.marketGate = {
-        ...runtimePlan.marketGate,
-        isMetaApiConnected: runtimePlan.marketGate.isMetaApiConnected && metaStatus.connected,
-        isBrokerHealthy: runtimePlan.marketGate.isBrokerHealthy && metaStatus.connected && metaStatus.tradeAllowed !== false,
-      };
-      if (metaStatus.accountInfo) {
-        runtimePlan.account = {
-          ...runtimePlan.account,
-          balance: metaStatus.accountInfo.balance,
-          equity: metaStatus.accountInfo.equity,
-          currency: metaStatus.accountInfo.currency,
-          status: metaStatus.connected ? 'connected' : 'disconnected',
-        };
-      }
-    } catch (error) {
-      console.error('[trade-execution] MetaApi runtime check failed:', error instanceof Error ? error.message : String(error));
-      runtimePlan.marketGate = {
-        ...runtimePlan.marketGate,
-        isMetaApiConnected: false,
-        isBrokerHealthy: false,
-      };
-    }
-  }
+  runtimePlan.marketGate = {
+    ...runtimePlan.marketGate,
+    isExecutionBridgeConnected: false,
+    isMetaApiConnected: false,
+  };
 
   const validation = validateTradeExecutionPlan(runtimePlan);
   if (!validation.allowed) {
@@ -175,27 +145,18 @@ export async function executeAccountableTrade(plan: TradeExecutionPlan): Promise
   }
 
   const live = isLiveExecutionEnabled(runtimePlan);
-  let metaApiResponse: Awaited<ReturnType<typeof placeMetaApiTradeOrder>> = {
+  let metaApiResponse: { success: boolean; orderId?: string; message?: string; raw?: unknown } = {
     success: true,
     orderId: `paper-${randomUUID()}`,
-    message: 'Paper execution recorded. Live MetaApi execution is disabled.',
+    message: 'Paper execution recorded. Live broker execution is disabled. This deployment uses Windows VPS MetaTrader 5 only.',
   };
 
   if (live) {
-    if (!runtimePlan.account?.metaApiAccountId) {
-      throw new Error('MetaApi account ID is required for live execution.');
-    }
-    metaApiResponse = await placeMetaApiTradeOrder({
-      accountId: runtimePlan.account.metaApiAccountId,
-      symbol: runtimePlan.symbol,
-      actionType: toMetaApiActionType(runtimePlan),
-      volume: validation.risk.finalLotSize,
-      openPrice: runtimePlan.orderType === 'market' ? undefined : runtimePlan.entryPrice,
-      stopLoss: runtimePlan.stopLoss!,
-      takeProfit: runtimePlan.takeProfit!,
-      comment: 'AlphaMentals validated trade',
-      clientId: runtimePlan.idempotencyKey,
-    });
+    metaApiResponse = {
+      success: false,
+      raw: { ok: false, error: 'METAAPI_DISABLED' },
+      message: 'MetaApi is disabled. This deployment uses Windows VPS MetaTrader 5 only.',
+    };
   }
 
   if (!metaApiResponse.success) {
@@ -203,7 +164,7 @@ export async function executeAccountableTrade(plan: TradeExecutionPlan): Promise
       ...validation,
       allowed: false,
       status: 'BLOCKED' as const,
-      blockingReasons: [`MetaApi execution failed: ${metaApiResponse.message ?? 'Unknown error'}`],
+      blockingReasons: [metaApiResponse.message ?? 'Live broker execution is disabled.'],
     };
     const response: ExecuteTradeResponse = {
       success: false,
@@ -212,7 +173,7 @@ export async function executeAccountableTrade(plan: TradeExecutionPlan): Promise
       blockingReasons: failedValidation.blockingReasons,
       warnings: validation.warnings,
       validation: failedValidation,
-      message: metaApiResponse.message ?? 'MetaApi execution failed.',
+      message: metaApiResponse.message ?? 'Live broker execution is disabled.',
     };
     const logId = await writeAccountabilityLog({
       plan: runtimePlan,
@@ -240,7 +201,7 @@ export async function executeAccountableTrade(plan: TradeExecutionPlan): Promise
     timeframe: 'Execution Gate',
     setupType: runtimePlan.setupName || runtimePlan.setupGrade,
     confluences: Object.entries(runtimePlan.playbookChecks).filter(([, value]) => value).map(([key]) => key),
-    tags: ['AlphaMentals Execution', live ? 'MetaApi Live' : 'Paper Mode'],
+    tags: ['AlphaMentals Execution', live ? 'Live Execution Requested' : 'Paper Mode'],
     preTradeEmotion: 'CALM',
     confidenceLevel: Math.max(1, Math.min(10, Math.round(validation.tradeHealthScore / 10))),
     tradePlan: runtimePlan.notes ?? 'AlphaMentals validated trade execution.',

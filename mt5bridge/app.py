@@ -101,6 +101,38 @@ def status(x_api_key: str | None = Header(default=None)):
         return {"ok": False, "mt5Initialized": False, "error": str(exc), "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+@app.get("/positions")
+def positions(x_api_key: str | None = Header(default=None)):
+    _check_api_key(x_api_key, required=False)
+    from .services.metatrader_service import get_positions
+
+    try:
+        return {
+            "ok": True,
+            "positions": get_positions(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as exc:
+        logger.exception("MT5 positions fetch failed")
+        return {"ok": False, "positions": [], "error": str(exc), "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/history")
+def history(x_api_key: str | None = Header(default=None)):
+    _check_api_key(x_api_key, required=False)
+    from .services.metatrader_service import get_history
+
+    try:
+        return {
+            "ok": True,
+            "history": get_history(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as exc:
+        logger.exception("MT5 history fetch failed")
+        return {"ok": False, "history": [], "error": str(exc), "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
 # ---------------------------------------------------------------------------
 # Symbol resolution
 # ---------------------------------------------------------------------------

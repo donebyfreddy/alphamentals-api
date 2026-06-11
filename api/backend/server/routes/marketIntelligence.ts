@@ -5,7 +5,7 @@ import { normalizeApiSymbol, normalizeDisplaySymbol } from '../../../src/service
 import { getTelegramRuntimeState, getTelegramScriptDiagnostics } from '../services/telegramBridge.service.js';
 import { getConfiguredOpenAIApiKey, getOpenAIModel } from '../lib/openaiConfig.js';
 import { getPersistenceStatus } from '../services/marketIntelligencePersistence.service.js';
-import { getActiveProviders } from '../lib/calendarProviders/index.js';
+import { fetchCalendarFromProviders, getActiveProviders, getCalendarProviderDiagnostics } from '../lib/calendarProviders/index.js';
 import { buildPairFundamentalAnalysis, type PairFundamentalAnalysis } from '../services/pairFundamentalsAi.service.js';
 import { buildPairIntelligence } from '../services/pairIntelligence.service.js';
 import { loadPairIntelligence } from '../services/pairIntelligencePersistence.service.js';
@@ -205,19 +205,59 @@ marketIntelligenceRouter.get('/events', async (_req, res) => {
 
 marketIntelligenceRouter.get('/calendar', async (_req, res) => {
   try {
-    await bootstrapFundamentals();
-    const overview = getFundamentalsOverview();
+    const now = new Date();
+    const from = new Date(now.getTime() - 2 * 86400000).toISOString().slice(0, 10);
+    const to = new Date(now.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+    const items = await fetchCalendarFromProviders(from, to);
+    const diagnostics = getCalendarProviderDiagnostics();
+
+    if (!items.length) {
+      res.json({
+        ok: false,
+        error: 'NO_CALENDAR_SOURCE_AVAILABLE',
+        items: [],
+        upcoming: [],
+        next4Hours: [],
+        diagnostics,
+        timezone: 'Europe/Madrid',
+        updatedAt: new Date().toISOString(),
+      });
+      return;
+    }
+
     res.json({
       ok: true,
-      items: getFundamentalsEvents(),
-      upcoming: overview.upcomingEvents,
-      next4Hours: overview.highImpactNext4Hours,
-      lastUpdated: overview.lastUpdated,
+      items,
+      upcoming: items,
+      next4Hours: items.filter((event) => event.impact === 'high').slice(0, 10),
+      diagnostics,
       timezone: 'Europe/Madrid',
-      updatedAt: overview.lastUpdated ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    res.status(500).json({ ok: false, error: 'CALENDAR_ERROR', message: error instanceof Error ? error.message : 'Failed to load calendar' });
+    res.json({
+      ok: false,
+      error: 'NO_CALENDAR_SOURCE_AVAILABLE',
+      message: error instanceof Error ? error.message : 'Failed to load calendar',
+      items: [],
+      diagnostics: getCalendarProviderDiagnostics(),
+      timezone: 'Europe/Madrid',
+      updatedAt: new Date().toISOString(),
+    });
+  }
+});
+
+// ── GET /calendar/diagnostics ────────────────────────────────────────────────
+
+marketIntelligenceRouter.get('/calendar/diagnostics', async (_req, res) => {
+  try {
+    res.json(getCalendarProviderDiagnostics());
+  } catch (error) {
+    res.json({
+      ok: true,
+      sources: {},
+      error: error instanceof Error ? error.message : 'Failed to load calendar diagnostics',
+    });
   }
 });
 
